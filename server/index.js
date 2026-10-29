@@ -322,7 +322,7 @@ if (fs.existsSync(distPath)) {
 
   // SPA fallback universal (compatível com Express 4 e Express 5)
   app.use((req, res, next) => {
-    if (req.method === 'GET' && !req.path.startsWith('/api')) {
+    if ((req.method === 'GET' || req.method === 'HEAD') && !req.path.startsWith('/api')) {
       return res.sendFile(path.join(distPath, 'index.html'));
     }
     next();
