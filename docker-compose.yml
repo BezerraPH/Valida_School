@@ -1,0 +1,27 @@
+services:
+  valida-school:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: valida_school_app
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3080}:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_PATH=/app/data/valida_school.db
+      - TZ=America/Sao_Paulo
+    volumes:
+      - valida_school_data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  valida_school_data:
+    name: valida_school_data
+    driver: local

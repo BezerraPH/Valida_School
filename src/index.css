@@ -1,0 +1,577 @@
+/* ==========================================================================
+   Valida School - Modern Design System & Cyber Biometric UI Tokens
+   ========================================================================== */
+
+:root {
+  --bg-primary: #07090e;
+  --bg-surface: #0f1422;
+  --bg-surface-elevated: #161f36;
+  --bg-surface-glass: rgba(15, 20, 34, 0.85);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-focus: rgba(99, 102, 241, 0.6);
+
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
+
+  --primary: #6366f1;
+  --primary-hover: #4f46e5;
+  --primary-glow: rgba(99, 102, 241, 0.4);
+
+  --success: #10b981;
+  --success-surface: rgba(16, 185, 129, 0.14);
+  --success-glow: rgba(16, 185, 129, 0.45);
+
+  --warning: #f59e0b;
+  --warning-surface: rgba(245, 158, 11, 0.14);
+
+  --danger: #ef4444;
+  --danger-surface: rgba(239, 68, 68, 0.16);
+
+  --cyan-accent: #06b6d4;
+
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-full: 9999px;
+
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 12px 30px -5px rgba(0, 0, 0, 0.6), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 0 30px rgba(99, 102, 241, 0.3);
+  --shadow-green-glow: 0 0 40px rgba(16, 185, 129, 0.4);
+
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg-primary);
+  background-image: 
+    radial-gradient(circle at 10% 10%, rgba(99, 102, 241, 0.1) 0%, transparent 45%),
+    radial-gradient(circle at 90% 90%, rgba(6, 182, 212, 0.08) 0%, transparent 50%),
+    linear-gradient(180deg, #07090e 0%, #0a0e18 100%);
+  color: var(--text-main);
+  min-height: 100vh;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Animations */
+@keyframes laserSweep {
+  0% { top: 6%; opacity: 0.3; }
+  50% { opacity: 1; }
+  100% { top: 92%; opacity: 0.3; }
+}
+
+@keyframes pulseBorder {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.02); opacity: 1; }
+}
+
+@keyframes hudCornerPulse {
+  0%, 100% { border-color: rgba(99, 102, 241, 0.5); }
+  50% { border-color: #06b6d4; }
+}
+
+@keyframes ringCountdown {
+  0% { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: 283; }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-8px); }
+  40%, 80% { transform: translateX(8px); }
+}
+
+/* Header & Top Bar */
+.role-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--bg-surface-glass);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.brand-badge {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: 800;
+  font-size: 1.15rem;
+  letter-spacing: -0.5px;
+  color: #fff;
+}
+
+.brand-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.45);
+}
+
+.role-nav {
+  display: flex;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 4px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+}
+
+.role-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 0.88rem;
+  font-weight: 600;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.role-btn:hover {
+  color: var(--text-main);
+}
+
+.role-btn.active {
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 2px 12px var(--primary-glow);
+}
+
+/* ==========================================================================
+   MOBILE PHONE MOCKUP (APP DO RESPONSÁVEL NATIVO iOS / ANDROID)
+   ========================================================================== */
+.phone-mockup-wrapper {
+  max-width: 410px;
+  width: 100%;
+  margin: 10px auto;
+  background: #000;
+  border-radius: 48px;
+  border: 4px solid #2a3142;
+  box-shadow: 
+    0 25px 60px -15px rgba(0, 0, 0, 0.9),
+    0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 0 40px rgba(99, 102, 241, 0.15);
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Dynamic Island / Top Notch */
+.phone-top-bar {
+  background: #000;
+  padding: 12px 24px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+  z-index: 20;
+}
+
+.dynamic-island {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 108px;
+  height: 26px;
+  background: #0d0f14;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 10px;
+}
+
+.dynamic-island-cam {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #050508;
+  border: 1px solid #1e2433;
+}
+
+.phone-screen {
+  background: var(--bg-surface);
+  flex: 1;
+  padding: 18px 20px;
+  min-height: 680px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+/* Bottom Tab Bar */
+.phone-bottom-nav {
+  background: rgba(15, 20, 34, 0.95);
+  backdrop-filter: blur(16px);
+  border-top: 1px solid var(--border-subtle);
+  padding: 10px 16px 18px;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+}
+
+.tab-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tab-nav-item.active {
+  color: #818cf8;
+}
+
+.tab-nav-item:hover {
+  color: #fff;
+}
+
+/* Home Indicator Bar */
+.home-indicator {
+  width: 130px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  margin: 6px auto 0;
+}
+
+/* ==========================================================================
+   TOTEM KIOSK INDUSTRIAL (PORTARIA ESCOLAR)
+   ========================================================================== */
+.kiosk-wrapper {
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-md);
+  padding: 32px 36px;
+  position: relative;
+}
+
+.kiosk-wrapper.fullscreen-mode {
+  max-width: 100% !important;
+  min-height: calc(100vh - 120px);
+  border-radius: 0;
+  border: none;
+  padding: 32px 48px;
+}
+
+/* Keypad Grid & Tactile Styling */
+.numpad-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  max-width: 360px;
+  margin: 0 auto;
+}
+
+.numpad-key {
+  height: 68px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface-elevated);
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 1.6rem;
+  font-weight: 700;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  user-select: none;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+}
+
+.numpad-key:hover {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: var(--primary);
+  transform: translateY(-2px);
+}
+
+.numpad-key:active,
+.numpad-key.key-active {
+  transform: translateY(2px);
+  background: var(--primary) !important;
+  color: #fff !important;
+  box-shadow: 0 0 15px var(--primary-glow);
+}
+
+.numpad-subtext {
+  font-family: var(--font-sans);
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+}
+
+/* PIN Display Slots */
+.pin-display-row {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin: 20px 0;
+}
+
+.pin-slot {
+  width: 52px;
+  height: 64px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-elevated);
+  border: 2px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 2rem;
+  font-weight: 800;
+  color: #fff;
+  transition: all 0.2s ease;
+}
+
+.pin-slot.filled {
+  border-color: var(--primary);
+  background: rgba(99, 102, 241, 0.18);
+  box-shadow: 0 0 14px var(--primary-glow);
+}
+
+.pin-slot.active {
+  border-color: var(--cyan-accent);
+  box-shadow: 0 0 18px rgba(6, 182, 212, 0.45);
+}
+
+/* ==========================================================================
+   BIOMETRIC CAMERA & HUD OVERLAYS
+   ========================================================================== */
+.biometric-viewport {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  height: 380px;
+  margin: 0 auto;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: #000;
+  border: 2px solid var(--border-subtle);
+  box-shadow: 0 0 35px rgba(0, 0, 0, 0.9);
+}
+
+.biometric-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+/* Oval Face Alignment Frame */
+.face-guide-oval {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 210px;
+  height: 280px;
+  border-radius: 50%;
+  border: 2px dashed rgba(99, 102, 241, 0.7);
+  pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+  transition: all 0.3s ease;
+}
+
+.face-guide-oval.detected {
+  border: 3px solid var(--success);
+  border-style: solid;
+  box-shadow: 0 0 30px var(--success-glow), 0 0 0 9999px rgba(0, 0, 0, 0.45);
+}
+
+/* High-tech HUD Brackets */
+.hud-bracket {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-color: rgba(99, 102, 241, 0.6);
+  pointer-events: none;
+  animation: hudCornerPulse 3s infinite ease-in-out;
+}
+.hud-tl { top: 18px; left: 18px; border-top: 3px solid; border-left: 3px solid; }
+.hud-tr { top: 18px; right: 18px; border-top: 3px solid; border-right: 3px solid; }
+.hud-bl { bottom: 18px; left: 18px; border-bottom: 3px solid; border-left: 3px solid; }
+.hud-br { bottom: 18px; right: 18px; border-bottom: 3px solid; border-right: 3px solid; }
+
+.laser-scanner {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, #06b6d4, #6366f1, #06b6d4, transparent);
+  box-shadow: 0 0 14px #06b6d4, 0 0 28px #6366f1;
+  animation: laserSweep 1.8s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+/* Auto-Capture Circular Countdown Progress */
+.countdown-overlay-container {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 140px;
+  height: 140px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.countdown-svg-ring {
+  transform: rotate(-90deg);
+  width: 140px;
+  height: 140px;
+}
+
+.countdown-svg-circle {
+  stroke-dasharray: 283;
+  stroke-dashoffset: 0;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.1s linear;
+}
+
+.countdown-number {
+  position: absolute;
+  font-family: var(--font-mono);
+  font-size: 3.2rem;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 0 20px #10b981;
+}
+
+/* Common UI Elements */
+.card-glass {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  transition: all 0.2s ease;
+}
+
+.button-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  color: #fff;
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 0.95rem;
+  padding: 12px 24px;
+  border-radius: var(--radius-sm);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 14px var(--primary-glow);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.button-primary:hover {
+  background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px var(--primary-glow);
+}
+
+.button-primary:active {
+  transform: translateY(1px);
+}
+
+.button-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 10px 18px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.button-secondary:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 999;
+}
+
+.modal-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  max-width: 520px;
+  width: 100%;
+  padding: 28px;
+  box-shadow: var(--shadow-md);
+  position: relative;
+  max-height: 90vh;
+  overflow-y: auto;
+}

@@ -1,0 +1,46 @@
+# ==============================================================================
+# Valida School - Configuração com Nginx Reverse Proxy (Produção / Escolas)
+# ==============================================================================
+# Uso: docker compose -f docker-compose.prod.yml up -d --build
+# ==============================================================================
+
+services:
+  valida-school:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: valida_school_app
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_PATH=/app/data/valida_school.db
+      - TZ=America/Sao_Paulo
+    volumes:
+      - valida_school_data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  nginx:
+    image: nginx:alpine
+    container_name: valida_school_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      valida-school:
+        condition: service_healthy
+
+volumes:
+  valida_school_data:
+    name: valida_school_data
+    driver: local
+

@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.gitignore
+.gemini
+*.log
+oxlint_output.txt
+.oxlintrc.json
+server/valida_school.db*
+data
+.env.local
+.DS_Store
+Thumbs.db
+
