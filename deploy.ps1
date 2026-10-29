@@ -39,3 +39,4 @@ Write-Host "🌐 Totem da Portaria:      http://${ServerHost}:3080/totem" -Foreg
 Write-Host "📱 Portal do Responsável:  http://${ServerHost}:3080/responsavel" -ForegroundColor Cyan
 Write-Host "🏫 Painel da Coordenação:  http://${ServerHost}:3080/escola" -ForegroundColor Cyan
 Write-Host "📺 Smart TV das Salas:     http://${ServerHost}:3080/chamada" -ForegroundColor Cyan
+
