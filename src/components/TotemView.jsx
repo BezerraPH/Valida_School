@@ -1,3 +1,20 @@
+/**
+ * ============================================================================
+ * TOTEM INTELIGENTE DE PORTARIA (QUIOSQUE & MOBILE) — VALIDA SCHOOL
+ * ============================================================================
+ * Rota: `/totem`
+ * Fluxo Principal (Modo Normal / Familiar):
+ *   1. `search`: digita Matrícula ou CPF do aluno (teclado touch ou físico).
+ *   2. `pin`: informa PIN de 6 dígitos (desbloqueia biometria; rate limit após 3 erros).
+ *   3. `facial`: validação biométrica com escolha de câmera, prova de vida (EAR) e múltiplas tentativas.
+ *   4. `result` / `denied`: confirmação formal na portaria ou botão Tentar Novamente.
+ *
+ * Fluxos Especiais:
+ *   - Modo Van Escolar (`flowMode === 'VAN'`): 1 biometria validada do condutor + checklist em lote.
+ *   - Código Secreto Diário (`isAdminCodeOpen`): bypass para funcionário autorizado sem PIN/biometria,
+ *     utilizando o código diário rotativo consultado apenas no Painel da Coordenação (`/escola`).
+ * ============================================================================
+ */
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   ShieldCheck, Search, Camera, CheckCircle2, 

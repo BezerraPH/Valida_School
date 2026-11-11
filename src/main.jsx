@@ -1,3 +1,10 @@
+/**
+ * ============================================================================
+ * PONTO DE ENTRADA DO FRONTEND REACT — VALIDA SCHOOL
+ * ============================================================================
+ * Monta o componente raiz `<App />` com os estilos globais (`index.css`).
+ * ============================================================================
+ */
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'

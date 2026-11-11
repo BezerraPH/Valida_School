@@ -1,3 +1,12 @@
+/**
+ * ============================================================================
+ * MODAL DE MATRÍCULA & EDIÇÃO DE ALUNO (EXCLUSIVO ESCOLA) — VALIDA SCHOOL
+ * ============================================================================
+ * Utilizado pela coordenação/secretaria para cadastrar novos alunos (gerando
+ * matrícula, CPF e responsável legal inicial com biometria) ou editar dados
+ * contratuais protegidos quando `editingStudent` é informado.
+ * ============================================================================
+ */
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   GraduationCap, X, Check, Camera, UserCheck, 

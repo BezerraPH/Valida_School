@@ -1,3 +1,12 @@
+/**
+ * ============================================================================
+ * VISUALIZADOR & IMPRESSOR DE CERTIFICADO DIGITAL LGPD — VALIDA SCHOOL
+ * ============================================================================
+ * Exibe o instrumento jurídico formal da autorização de retirada de menor,
+ * com hash de autenticidade, vigência, dados do outorgante/outorgado e
+ * suporte a impressão/exportação em PDF via `window.print()`.
+ * ============================================================================
+ */
 import React from 'react';
 import { 
   X, Printer, ShieldCheck, Award 

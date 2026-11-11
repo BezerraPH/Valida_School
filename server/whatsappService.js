@@ -1,5 +1,13 @@
-// WhatsApp Notification Service with Strategy Pattern (Valida School)
-// Compatible with: 'mock' (Console/Dev), 'waha' / 'evolution' (Docker On-Premise) and 'meta' (Official Cloud API)
+/**
+ * ============================================================================
+ * SERVIÇO DE NOTIFICAÇÕES WHATSAPP — VALIDA SCHOOL (Padrão Strategy)
+ * ============================================================================
+ * Provedores suportados via variável de ambiente `WHATSAPP_PROVIDER`:
+ *   - `mock` (padrão dev): registra mensagens no log do servidor sem envio externo.
+ *   - `waha` ou `evolution`: integra com containers locais WAHA / Evolution API (`WAHA_URL`).
+ *   - `meta`: integra com a Cloud API oficial da Meta (`WHATSAPP_META_TOKEN` e `WHATSAPP_META_PHONE_ID`).
+ * ============================================================================
+ */
 
 const PROVIDER = process.env.WHATSAPP_PROVIDER || 'mock';
 const META_TOKEN = process.env.WHATSAPP_META_TOKEN || '';

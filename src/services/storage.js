@@ -1,4 +1,18 @@
-// LocalStorage Database & State Manager with Central Server Sync (Valida School)
+/**
+ * ============================================================================
+ * GERENCIADOR DE ESTADO LOCAL + SINCRONIZAÇÃO CENTRAL — VALIDA SCHOOL
+ * ============================================================================
+ * Responsabilidade:
+ *   Manter cache reativo no `localStorage` para operação resiliente (offline-first)
+ *   enquanto sincroniza alterações bidirecionalmente com a API REST e WebSockets.
+ *
+ * Chaves utilizadas no `localStorage`:
+ *   - `valida_school_students`: lista de alunos e seus autorizados/responsáveis.
+ *   - `valida_school_pins`: PINs ativos locais (validade de 15 minutos).
+ *   - `valida_school_logs`: histórico de liberações e alertas de segurança.
+ *   - `valida_school_pin_attempts`: controle anti-brute-force (bloqueio após 3 erros).
+ * ============================================================================
+ */
 import { 
   initWebSocket, fetchStudentsFromApi, createStudentApi, updateStudentApi, deleteStudentApi,
   updateBiometricsApi, updateGuardianProfileApi, generatePinApi, generateFamilyPinApi,

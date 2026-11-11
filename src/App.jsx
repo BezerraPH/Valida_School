@@ -1,3 +1,19 @@
+/**
+ * ============================================================================
+ * ROTEADOR PRINCIPAL & LAYOUT MODULAR — VALIDA SCHOOL
+ * ============================================================================
+ * Define as rotas dos 4 módulos do ecossistema:
+ *   - `/`             -> PortalHub (seleção de terminal/dispositivo)
+ *   - `/totem`        -> TotemView (portaria: PIN + Biometria + Van + Código Diário)
+ *   - `/responsavel`  -> GuardianView (mobile pais: PIN, terceiros, perfil, teste facial)
+ *   - `/escola`       -> SchoolView (gestão escolar, logs, CSV, alunos e código diário)
+ *   - `/chamada`      -> CallBoardView (Smart TV em tempo real nas salas de aula)
+ *
+ * Governança de Rotas:
+ *   Em `/responsavel`, o botão `+ Novo Aluno` permanece oculto pois o cadastro
+ *   de crianças e matrículas é exclusivo da secretaria escolar.
+ * ============================================================================
+ */
 import React, { useState } from 'react';
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
 import PortalHub from './components/PortalHub';

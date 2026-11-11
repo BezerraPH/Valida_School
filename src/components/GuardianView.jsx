@@ -1,3 +1,19 @@
+/**
+ * ============================================================================
+ * APP DO RESPONSÁVEL (MOBILE FIRST PWA) — VALIDA SCHOOL
+ * ============================================================================
+ * Rota: `/responsavel`
+ * Funcionalidades e Regras de Governança:
+ *   1. Aba Início (`home`): seleção de múltiplos filhos e geração de PIN Familiar (15 min).
+ *   2. Aba Autorizados (`adults`): cadastrar, editar, revogar, apagar terceiros/vans e ver Termo LGPD.
+ *      Responsáveis Legais cadastrados pela escola ficam bloqueados para edição/exclusão.
+ *   3. Aba Histórico (`history`): acompanhamento em tempo real de todas as retiradas.
+ *   4. Aba Perfil & Teste Facial (`profile`):
+ *      - Permite editar APENAS foto biométrica, telefone e e-mail.
+ *      - Bloqueia edição de CPF, nome civil, matrícula e filhos vinculados (exclusivo escola).
+ *      - Inclui simulador/teste de reconhecimento facial ao vivo ou por selfie enviada.
+ * ============================================================================
+ */
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   KeyRound, Clock, 

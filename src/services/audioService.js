@@ -1,4 +1,12 @@
-// Audio synthesis & Voice Guidance Service (Web Audio API + Web Speech API)
+/**
+ * ============================================================================
+ * SERVIÇO DE FEEDBACK SONORO & SÍNTESE DE VOZ (TTS) — VALIDA SCHOOL
+ * ============================================================================
+ * Utiliza Web Audio API para tons táteis (teclado do totem, radar biométrico,
+ * confirmação e alerta sonoro) e Web Speech API (`pt-BR`) para orientar pais,
+ * motoristas e professores na portaria e Smart TV das salas.
+ * ============================================================================
+ */
 
 let audioCtx = null;
 

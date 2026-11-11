@@ -1,3 +1,12 @@
+/**
+ * ============================================================================
+ * MODAL DE CAPTURA BIOMÉTRICA FACIAL RÁPIDA — VALIDA SCHOOL
+ * ============================================================================
+ * Permite cadastrar o rosto de um adulto autorizado via webcam (com seletor de
+ * câmera) ou envio de foto/selfie, extraindo o vetor neural 128-D e gravando
+ * tanto no armazenamento local quanto no servidor central.
+ * ============================================================================
+ */
 import React, { useState, useRef, useEffect } from 'react';
 import { Camera, X, Check, AlertCircle, RefreshCw, UserCheck, Video, Upload } from 'lucide-react';
 import { 

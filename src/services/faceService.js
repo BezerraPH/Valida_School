@@ -1,4 +1,20 @@
-// Face Recognition & Biometrics Service using @vladmandic/face-api
+/**
+ * ============================================================================
+ * MOTOR DE BIOMETRIA FACIAL & PROVA DE VIDA — VALIDA SCHOOL
+ * ============================================================================
+ * Baseado em `@vladmandic/face-api` (TensorFlow.js no navegador).
+ *
+ * Responsabilidade:
+ *   1. Carregar modelos neurais localmente (`/models`) com fallback para CDN.
+ *   2. Enumerar e gerenciar webcams/câmeras (`getVideoDevices`, `startCameraStream`).
+ *   3. Detectar múltiplas faces no enquadramento e extrair vetores 128-D (`faceDescriptor`).
+ *   4. Calcular Eye Aspect Ratio (EAR) nos 68 pontos faciais para Prova de Vida (piscar).
+ *   5. Comparar vetores via Distância Euclidiana (`MIN_SIMILARITY_THRESHOLD = 68%`).
+ *
+ * Regra de Segurança:
+ *   Nunca aprovar acesso sem vetor neural válido; falhas de detecção retornam vazio/null.
+ * ============================================================================
+ */
 import * as faceapi from '@vladmandic/face-api';
 
 let modelsLoaded = false;

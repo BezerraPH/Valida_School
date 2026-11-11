@@ -1,3 +1,12 @@
+/**
+ * ============================================================================
+ * MODAL DE CADASTRO & EDIÇÃO DE TERCEIROS / VANS COM TERMO LGPD — VALIDA SCHOOL
+ * ============================================================================
+ * Permite ao responsável legal criar ou editar (`editingAuth`) autorizações para
+ * familiares, babás ou motoristas de van escolar, capturando biometria facial (128-D)
+ * e registrando aceite eletrônico conforme Art. 14 da LGPD (Lei nº 13.709/2018).
+ * ============================================================================
+ */
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   ShieldCheck, X, FileText, Check, AlertCircle, 

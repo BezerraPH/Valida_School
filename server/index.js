@@ -1,5 +1,19 @@
-// Valida School Central API Server & Real-time WebSocket Hub
-// Suporte a Relações N:N, PIN Familiar Multialuno, Termos Legais e Vans Escolares
+/**
+ * ============================================================================
+ * SERVIDOR CENTRAL API REST + HUB WEBSOCKET + SERVIÇO SPA — VALIDA SCHOOL
+ * ============================================================================
+ * Responsabilidade:
+ *   1. Expor rotas REST (`/api/*`) para gestão escolar, responsáveis, PINs, vans e código diário.
+ *   2. Gerenciar conexões WebSocket em tempo real para atualizar Totem, App dos Pais e TV das Salas.
+ *   3. Em produção/container, servir o build estático do frontend (`dist/`) com fallback SPA.
+ *
+ * Eventos WebSocket emitidos via `broadcastEvent(type, payload)`:
+ *   - `NOVO_ALUNO` | `ALUNO_ATUALIZADO` | `ALUNO_REMOVIDO`
+ *   - `AUTORIZACAO_CRIADA` | `AUTORIZACAO_ATUALIZADA` | `AUTORIZACAO_REVOGADA`
+ *   - `BIOMETRIA_ATUALIZADA` | `PERFIL_ATUALIZADO` | `PIN_GERADO`
+ *   - `ALUNO_LIBERADO` | `VAN_LOTE_LIBERADO` | `ALERTA_SEGURANCA` | `CODIGO_DIARIO_ATUALIZADO`
+ * ============================================================================
+ */
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'node:http';

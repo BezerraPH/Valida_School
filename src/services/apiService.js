@@ -1,4 +1,17 @@
-// Valida School Central API & WebSocket Client with Offline Cache
+/**
+ * ============================================================================
+ * CLIENTE HTTP REST & WEBSOCKET — FRONTEND VALIDA SCHOOL
+ * ============================================================================
+ * Responsabilidade:
+ *   Centralizar toda comunicação com o servidor Node.js, detectando automaticamente
+ *   o protocolo seguro (`https:` -> `wss:`) em produção/container e oferecendo fallback
+ *   offline seguro para cache em `localStorage` quando a rede escolar oscilar.
+ *
+ * Variáveis de ambiente opcionais (Vite):
+ *   - `VITE_API_URL`: sobrescreve a URL base HTTP da API.
+ *   - `VITE_WS_URL`: sobrescreve a URL do socket em tempo real.
+ * ============================================================================
+ */
 const API_BASE_URL = import.meta.env.VITE_API_URL 
   || (import.meta.env.DEV ? 'http://localhost:3001' : (typeof window !== 'undefined' ? window.location.origin : ''));
 

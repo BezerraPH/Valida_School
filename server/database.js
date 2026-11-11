@@ -1,5 +1,18 @@
-// SQLite Database Engine using Node.js 22 native DatabaseSync
-// Modelagem N:N (Muitos para Muitos), PIN Familiar Multialuno e Modo Van Escolar
+/**
+ * ============================================================================
+ * MÓDULO DE BANCO DE DADOS CENTRAL — VALIDA SCHOOL (SQLite + Node.js 22)
+ * ============================================================================
+ * Responsabilidade:
+ *   Persistir e consultar dados estruturados de instituições, alunos,
+ *   responsáveis legais, terceiros/vans (relação N:N), PINs familiares,
+ *   códigos secretos diários e logs imutáveis de auditoria.
+ *
+ * Pontos de Manutenção / Extensão:
+ *   - Variável `DB_PATH`: define o caminho do arquivo .db (em Docker: /app/data/valida_school.db).
+ *   - Para migração futura para PostgreSQL, manter os mesmos nomes de métodos
+ *     exportados (`studentQueries`, `pinQueries`, `vanQueries`, `logQueries`, `dailyCodeQueries`).
+ * ============================================================================
+ */
 import { DatabaseSync } from 'node:sqlite';
 import crypto from 'node:crypto';
 import fs from 'node:fs';

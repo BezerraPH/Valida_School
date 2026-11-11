@@ -1,20 +1,40 @@
-// Smart TV Classroom Call Board (/chamada) for Valida School
+/**
+ * ============================================================================
+ * PAINEL DE CHAMADA SMART TV (SALAS & PÁTIO) — VALIDA SCHOOL
+ * ============================================================================
+ * Rota: `/chamada`
+ * Responsabilidade:
+ *   - Escutar eventos `ALUNO_LIBERADO` e `VAN_LOTE_LIBERADO` via WebSocket.
+ *   - Exibir cards em tempo real com turma, adulto que retirou e portão.
+ *   - Anunciar por áudio e síntese de voz (TTS `pt-BR`) para os professores.
+ * ============================================================================
+ */
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Tv, Volume2, VolumeX, Maximize2, Minimize2, Bell, 
   Sparkles, CheckCircle2, Clock, User, ShieldCheck 
 } from 'lucide-react';
 import { subscribeToEvents } from '../services/apiService';
-import { getExitLogs } from '../services/storage';
+import { getExitLogs, subscribeStorage } from '../services/storage';
 import { playSuccessChime, speakVoice } from '../services/audioService';
 
 export default function CallBoardView() {
-  const [recentReleases, setRecentReleases] = useState(() => getExitLogs().slice(0, 12));
+  const [recentReleases, setRecentReleases] = useState(() => 
+    getExitLogs().filter(l => l.status === 'LIBERADO').slice(0, 12)
+  );
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [lastAnnouncedId, setLastAnnouncedId] = useState(null);
   const containerRef = useRef(null);
+
+  // Mantém sincronização quando logs chegam do servidor via storage.js
+  useEffect(() => {
+    const unsubStorage = subscribeStorage(() => {
+      setRecentReleases(getExitLogs().filter(l => l.status === 'LIBERADO').slice(0, 16));
+    });
+    return () => unsubStorage();
+  }, []);
 
   // Relógio do painel da TV
   useEffect(() => {
@@ -245,7 +265,7 @@ export default function CallBoardView() {
                     ? '2px solid #818cf8' 
                     : '1px solid rgba(255, 255, 255, 0.1)',
                   borderRadius: '20px',
-                  padding: '20px',
+                  padding: isFirst ? '40px 20px 20px' : '20px',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '18px',

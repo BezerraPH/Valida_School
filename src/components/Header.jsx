@@ -1,3 +1,11 @@
+/**
+ * ============================================================================
+ * CABEÇALHO ALTERNATIVO DE TROCA RÁPIDA & STATUS DA IA — VALIDA SCHOOL
+ * ============================================================================
+ * Exibe badge de carregamento dos modelos neurais (`faceService`) e atalhos
+ * de navegação para ambientes em modo demonstração unificada.
+ * ============================================================================
+ */
 import React, { useEffect, useState } from 'react';
 import { ShieldCheck, Smartphone, MonitorSmartphone, LayoutDashboard, Cpu, Camera, GraduationCap } from 'lucide-react';
 import { areModelsLoaded, loadFaceModels } from '../services/faceService';

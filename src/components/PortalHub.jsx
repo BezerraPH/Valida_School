@@ -1,4 +1,11 @@
-// Valida School Ecosystem Portal Hub (Landing Page for selecting active interface)
+/**
+ * ============================================================================
+ * PORTAL HUB (TELA INICIAL DE SELEÇÃO DE MÓDULO) — VALIDA SCHOOL
+ * ============================================================================
+ * Interface de entrada para escolher qual papel o dispositivo irá assumir:
+ * Totem da Portaria, App dos Pais, Painel da Coordenação ou TV das Salas.
+ * ============================================================================
+ */
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { 
@@ -145,8 +152,8 @@ export default function PortalHub() {
         {/* 4 Core Module Cards */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(270px, 1fr))',
-          gap: '24px'
+          gridTemplateColumns: 'repeat(auto-fit, minmax(245px, 1fr))',
+          gap: '20px'
         }}>
           {modules.map((mod) => {
             const Icon = mod.icon;

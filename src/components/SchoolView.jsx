@@ -1,3 +1,15 @@
+/**
+ * ============================================================================
+ * PAINEL DA COORDENAÇÃO & GESTÃO ESCOLAR — VALIDA SCHOOL
+ * ============================================================================
+ * Rota: `/escola`
+ * Responsabilidade:
+ *   1. Consultar/Ocultar/Copiar/Regenerar o Código Secreto Diário de Liberação Administrativa.
+ *   2. Monitorar KPIs em tempo real (alunos cadastrados, saídas liberadas, pendentes e alertas).
+ *   3. Auditar logs com filtros (Famílias, Vans, Código/Contingência, Negados), Termo LGPD e CSV.
+ *   4. Gerenciar a base oficial de alunos (matrícula, CPF, turma, sala) na aba Alunos & Matrículas.
+ * ============================================================================
+ */
 import React, { useState, useEffect } from 'react';
 import { 
   Users, CheckCircle2, ShieldAlert, Clock, Search, 
