@@ -21,7 +21,25 @@ services:
       retries: 3
       start_period: 10s
 
+  valida-school-https:
+    image: caddy:alpine
+    container_name: valida_school_https
+    restart: unless-stopped
+    ports:
+      - "${HTTPS_PORT:-3443}:3443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - valida_school_caddy_data:/data
+      - valida_school_caddy_config:/config
+    depends_on:
+      valida-school:
+        condition: service_healthy
+
 volumes:
   valida_school_data:
     name: valida_school_data
     driver: local
+  valida_school_caddy_data:
+    name: valida_school_caddy_data
+  valida_school_caddy_config:
+    name: valida_school_caddy_config

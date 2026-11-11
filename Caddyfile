@@ -1,0 +1,12 @@
+# Valida School - Proxy Reverso HTTPS para Liberação de Câmera/WebRTC em Rede Local
+{
+    admin off
+    https_port 3443
+    default_sni 192.168.1.6
+}
+
+https://192.168.1.6:3443, https://localhost:3443, https://ntek-servidor:3443, https://100.94.55.27:3443 {
+    tls internal
+
+    reverse_proxy valida-school:3000
+}
