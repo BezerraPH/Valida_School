@@ -1,13 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   ShieldCheck, X, FileText, Check, AlertCircle, 
-  Bus, UserCheck, Shield
+  Bus, UserCheck, Shield, Camera, Upload, Video
 } from 'lucide-react';
 import { addThirdPartyAuthorizationApi } from '../services/apiService';
-import { getStudents, saveStudents } from '../services/storage';
+import { getStudents, saveStudents, updateThirdPartyAuthorizationLocal } from '../services/storage';
+import { 
+  startCameraStream, stopCameraStream, detectFaceAndComputeDescriptor,
+  getVideoDevices, captureVideoFrameDataUrl
+} from '../services/faceService';
 import { playSuccessChime } from '../services/audioService';
 
-export default function ThirdPartyModal({ isOpen, onClose, currentGuardian, childrenList = [], onAuthorized }) {
+export default function ThirdPartyModal({ isOpen, onClose, currentGuardian, childrenList = [], editingAuth = null, onAuthorized }) {
   const [tipo, setTipo] = useState('TERCEIRO'); // 'TERCEIRO' ou 'VAN'
   const [nome, setNome] = useState('');
   const [cpf, setCpf] = useState('');
@@ -17,9 +21,147 @@ export default function ThirdPartyModal({ isOpen, onClose, currentGuardian, chil
   const [vanPlaca, setVanPlaca] = useState('');
   const [validadeTipo, setValidadeTipo] = useState('ANUAL'); // 'HOJE', 'MENSAL', 'ANUAL'
   const [selectedStudentIds, setSelectedStudentIds] = useState(() => childrenList.map(c => c.id));
+  const [foto, setFoto] = useState('');
+  const [faceDescriptor, setFaceDescriptor] = useState(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isProcessingFace, setIsProcessingFace] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [videoDevices, setVideoDevices] = useState([]);
+  const [selectedCameraId, setSelectedCameraId] = useState(() => localStorage.getItem('valida_school_preferred_camera') || '');
   const [errorMsg, setErrorMsg] = useState('');
+
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  function stopCam() {
+    if (streamRef.current) {
+      stopCameraStream(streamRef.current);
+      streamRef.current = null;
+    }
+  }
+
+  useEffect(() => {
+    if (isOpen) {
+      setErrorMsg('');
+      setCameraOpen(false);
+      if (editingAuth) {
+        setTipo(editingAuth.tipo === 'VAN' || editingAuth.isTransportador ? 'VAN' : 'TERCEIRO');
+        setNome(editingAuth.nome || '');
+        setCpf(editingAuth.cpf || '');
+        setTelefone(editingAuth.telefone || '');
+        setParentesco(editingAuth.parentesco || 'Tio(a)');
+        setVanEmpresa(editingAuth.vanEmpresa || '');
+        setVanPlaca(editingAuth.vanPlaca || '');
+        setValidadeTipo(editingAuth.validadeTipo || 'ANUAL');
+        setFoto(editingAuth.foto || '');
+        setFaceDescriptor(editingAuth.faceDescriptor || null);
+        setSelectedStudentIds(childrenList.map(c => c.id));
+        setAcceptedTerms(true);
+      } else {
+        setTipo('TERCEIRO');
+        setNome('');
+        setCpf('');
+        setTelefone('');
+        setParentesco('Tio(a)');
+        setVanEmpresa('');
+        setVanPlaca('');
+        setValidadeTipo('ANUAL');
+        setFoto('');
+        setFaceDescriptor(null);
+        setSelectedStudentIds(childrenList.map(c => c.id));
+        setAcceptedTerms(false);
+      }
+      getVideoDevices().then(devs => {
+        setVideoDevices(devs);
+        setSelectedCameraId(prev => prev || (devs.length > 0 ? devs[0].deviceId : ''));
+      });
+    } else {
+      stopCam();
+    }
+    return () => stopCam();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, editingAuth]);
+
+  useEffect(() => {
+    if (!cameraOpen || !isOpen) {
+      stopCam();
+      return;
+    }
+    let active = true;
+    (async () => {
+      try {
+        stopCam();
+        await new Promise(r => setTimeout(r, 60));
+        if (!active) return;
+        const stream = await startCameraStream(videoRef.current, selectedCameraId);
+        if (active) {
+          streamRef.current = stream;
+        } else {
+          stopCameraStream(stream);
+        }
+      } catch (err) {
+        if (active) setErrorMsg(err.message || 'Câmera indisponível neste dispositivo.');
+      }
+    })();
+    return () => {
+      active = false;
+      stopCam();
+    };
+  }, [cameraOpen, selectedCameraId, isOpen]);
+
+  async function handleCaptureFace() {
+    if (!videoRef.current) return;
+    setIsProcessingFace(true);
+    setErrorMsg('');
+    try {
+      const snapped = captureVideoFrameDataUrl(videoRef.current, true);
+      if (!snapped) return;
+      const detection = await detectFaceAndComputeDescriptor(snapped.canvas);
+      if (!detection || !detection.descriptor) {
+        setErrorMsg('Rosto não detectado com clareza. Ilumine o rosto e tente novamente ou use Enviar Foto.');
+        return;
+      }
+      setFoto(snapped.dataUrl);
+      setFaceDescriptor(detection.descriptor);
+      setCameraOpen(false);
+      stopCam();
+    } catch (err) {
+      setErrorMsg('Falha ao capturar biometria: ' + err.message);
+    } finally {
+      setIsProcessingFace(false);
+    }
+  }
+
+  function handleUploadFace(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setErrorMsg('');
+    setIsProcessingFace(true);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target.result;
+      const img = new Image();
+      img.onload = async () => {
+        try {
+          const detection = await detectFaceAndComputeDescriptor(img);
+          if (!detection || !detection.descriptor) {
+            setErrorMsg('Não foi possível detectar um rosto nítido nesta imagem. Use uma foto de rosto frontal.');
+            return;
+          }
+          setFoto(dataUrl);
+          setFaceDescriptor(detection.descriptor);
+        } catch (err) {
+          setErrorMsg('Erro ao processar foto: ' + err.message);
+        } finally {
+          setIsProcessingFace(false);
+        }
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  }
 
   const guardianName = currentGuardian?.nome || 'Ana Silva Pereira';
   const guardianCpf = currentGuardian?.cpf || '111.222.333-44';
@@ -93,6 +235,31 @@ Declaro que este consentimento é fornecido em melhor interesse do(s) menor(es) 
         validadeAte = now + (300 * 24 * 60 * 60 * 1000); // Ano Letivo
       }
 
+      const finalPhoto = foto || (tipo === 'VAN' 
+        ? 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=240&auto=format&fit=crop&q=80'
+        : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=240&auto=format&fit=crop&q=80');
+
+      if (editingAuth) {
+        updateThirdPartyAuthorizationLocal(editingAuth.authId, editingAuth.id, {
+          nome: nome.trim(),
+          cpf: cpf.trim(),
+          telefone: telefone.trim(),
+          parentesco: tipo === 'VAN' ? 'Transporte Escolar (Van)' : parentesco,
+          validadeTipo,
+          validadeAte,
+          isTransportador: tipo === 'VAN',
+          vanEmpresa: tipo === 'VAN' ? vanEmpresa.trim() : null,
+          vanPlaca: tipo === 'VAN' ? vanPlaca.trim() : null,
+          foto: finalPhoto,
+          faceDescriptor: faceDescriptor || editingAuth.faceDescriptor || null,
+          termoTexto
+        });
+        playSuccessChime();
+        if (onAuthorized) onAuthorized();
+        onClose();
+        return;
+      }
+
       const payload = {
         alunoIds: selectedStudentIds,
         adulto: {
@@ -102,9 +269,8 @@ Declaro que este consentimento é fornecido em melhor interesse do(s) menor(es) 
           isTransportador: tipo === 'VAN',
           vanEmpresa: tipo === 'VAN' ? vanEmpresa.trim() : null,
           vanPlaca: tipo === 'VAN' ? vanPlaca.trim() : null,
-          foto: tipo === 'VAN' 
-            ? 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=240&auto=format&fit=crop&q=80'
-            : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=240&auto=format&fit=crop&q=80'
+          foto: finalPhoto,
+          faceDescriptor: faceDescriptor || null
         },
         parentesco: tipo === 'VAN' ? 'Transporte Escolar (Van)' : parentesco,
         validadeTipo,
@@ -140,8 +306,8 @@ Declaro que este consentimento é fornecido em melhor interesse do(s) menor(es) 
             isTransportador: payload.adulto.isTransportador,
             vanEmpresa: payload.adulto.vanEmpresa,
             vanPlaca: payload.adulto.vanPlaca,
-            biometriaCadastrada: true,
-            faceDescriptor: null
+            biometriaCadastrada: Boolean(faceDescriptor),
+            faceDescriptor: faceDescriptor || null
           });
         }
       }
@@ -212,10 +378,10 @@ Declaro que este consentimento é fornecido em melhor interesse do(s) menor(es) 
             </div>
             <div>
               <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#fff', margin: 0 }}>
-                Autorizar Terceiro ou Van Escolar
+                {editingAuth ? 'Editar Pessoa Autorizada / Van' : 'Autorizar Terceiro ou Van Escolar'}
               </h3>
               <span style={{ fontSize: '0.75rem', color: '#818cf8', fontWeight: 600 }}>
-                Emissão de Termo Formal de Retirada (LGPD Art. 14)
+                {editingAuth ? 'Atualize dados, validade e foto biométrica' : 'Emissão de Termo Formal de Retirada (LGPD Art. 14)'}
               </span>
             </div>
           </div>
@@ -443,6 +609,105 @@ Declaro que este consentimento é fornecido em melhor interesse do(s) menor(es) 
             )}
           </div>
 
+          {/* Foto e Biometria Facial do Autorizado */}
+          <div style={{
+            background: 'rgba(255, 255, 255, 0.03)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-sm)',
+            padding: '12px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: faceDescriptor ? '#10b981' : '#fff' }}>
+                {faceDescriptor ? '✓ Biometria Facial Extraída (Pronta para o Totem)' : 'Foto Facial para Reconhecimento no Totem'}
+              </span>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => setCameraOpen(!cameraOpen)}
+                  style={{ padding: '5px 10px', fontSize: '0.74rem' }}
+                >
+                  <Camera size={13} />
+                  <span>{cameraOpen ? 'Fechar Câmera' : 'Usar Câmera'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                  style={{ padding: '5px 10px', fontSize: '0.74rem' }}
+                  disabled={isProcessingFace}
+                >
+                  <Upload size={13} />
+                  <span>Enviar Foto</span>
+                </button>
+              </div>
+            </div>
+
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept="image/*"
+              capture="user"
+              style={{ display: 'none' }}
+              onChange={handleUploadFace}
+            />
+
+            {cameraOpen ? (
+              <div style={{ marginTop: '8px' }}>
+                {videoDevices.length > 1 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                    <Video size={13} color="#818cf8" />
+                    <select
+                      className="input-field"
+                      value={selectedCameraId}
+                      onChange={e => {
+                        setSelectedCameraId(e.target.value);
+                        localStorage.setItem('valida_school_preferred_camera', e.target.value);
+                      }}
+                      style={{ padding: '5px 8px', fontSize: '0.76rem' }}
+                    >
+                      {videoDevices.map(d => (
+                        <option key={d.deviceId} value={d.deviceId}>
+                          {d.label || `Câmera ${d.deviceId.slice(0, 6)}`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <div style={{ position: 'relative', height: '190px', background: '#000', borderRadius: '8px', overflow: 'hidden', marginBottom: '8px' }}>
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="button-primary"
+                  onClick={handleCaptureFace}
+                  disabled={isProcessingFace}
+                  style={{ width: '100%', padding: '8px', fontSize: '0.82rem' }}
+                >
+                  <Camera size={15} />
+                  <span>{isProcessingFace ? 'Analisando rosto...' : 'Capturar Rosto e Extrair Biometria'}</span>
+                </button>
+              </div>
+            ) : foto && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
+                <img
+                  src={foto}
+                  alt="Preview"
+                  style={{ width: '44px', height: '44px', borderRadius: '50%', objectFit: 'cover', border: faceDescriptor ? '2px solid #10b981' : '1px solid var(--border-subtle)' }}
+                />
+                <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                  {faceDescriptor ? 'Vetor facial salvo (128 dimensões). Reconhecimento ativo.' : 'Foto selecionada sem extração facial ainda. Tire ou envie uma foto nítida.'}
+                </span>
+              </div>
+            )}
+          </div>
+
           {/* Validade */}
           <div>
             <label style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>
@@ -562,7 +827,7 @@ Declaro que este consentimento é fornecido em melhor interesse do(s) menor(es) 
               }}
             >
               <ShieldCheck size={18} />
-              <span>{isSubmitting ? 'Registrando...' : 'Assinar e Conceder Autorização'}</span>
+              <span>{isSubmitting ? 'Salvando...' : (editingAuth ? 'Salvar Alterações' : 'Assinar e Conceder Autorização')}</span>
             </button>
           </div>
         </form>

@@ -1,15 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Users, CheckCircle2, ShieldAlert, Clock, Search, 
-  FileText, GraduationCap, Download
+  FileText, GraduationCap, Download, KeyRound, Eye, EyeOff,
+  RefreshCw, Copy, CheckCheck, Edit3, Trash2
 } from 'lucide-react';
-import { getStudents, getExitLogs, subscribeStorage, recordExitLog } from '../services/storage';
-import { playSuccessChime } from '../services/audioService';
+import { 
+  getStudents, getExitLogs, subscribeStorage, recordExitLog, deleteStudentLocal 
+} from '../services/storage';
+import { fetchDailySecretCodeApi, rotateDailySecretCodeApi } from '../services/apiService';
+import { playSuccessChime, playPinClick } from '../services/audioService';
 import TermViewerModal from './TermViewerModal';
+import StudentModal from './StudentModal';
 
 export default function SchoolView({ onOpenStudentModal }) {
   const [students, setStudents] = useState(getStudents());
   const [exitLogs, setExitLogs] = useState(getExitLogs());
+  const [activeTab, setActiveTab] = useState('logs'); // 'logs' | 'students'
   const [searchTerm, setSearchTerm] = useState('');
   const [manualModalOpen, setManualModalOpen] = useState(false);
   const [selectedStudentForManual, setSelectedStudentForManual] = useState('');
@@ -17,6 +23,16 @@ export default function SchoolView({ onOpenStudentModal }) {
   const [inspectorName] = useState('Inspetor Carlos');
   const [isTermViewerOpen, setIsTermViewerOpen] = useState(false);
   const [selectedAuthForTerm, setSelectedAuthForTerm] = useState(null);
+
+  // Edição de alunos protegidos pela escola
+  const [editingStudent, setEditingStudent] = useState(null);
+  const [isEditStudentOpen, setIsEditStudentOpen] = useState(false);
+
+  // Código Secreto Diário de Liberação Administrativa
+  const [dailyCodeInfo, setDailyCodeInfo] = useState(null);
+  const [showDailyCode, setShowDailyCode] = useState(false);
+  const [copiedDailyCode, setCopiedDailyCode] = useState(false);
+  const [rotatingCode, setRotatingCode] = useState(false);
 
   useEffect(() => {
     function refresh() {
@@ -26,8 +42,43 @@ export default function SchoolView({ onOpenStudentModal }) {
 
     const unsub = subscribeStorage(refresh);
     refresh();
+
+    fetchDailySecretCodeApi().then(info => {
+      if (info) setDailyCodeInfo(info);
+    });
+
     return () => unsub();
   }, []);
+
+  async function handleRotateDailyCode() {
+    const confirmed = window.confirm('Deseja gerar um novo Código Secreto Diário agora? O código anterior deixará de funcionar imediatamente.');
+    if (!confirmed) return;
+    setRotatingCode(true);
+    try {
+      const updated = await rotateDailySecretCodeApi();
+      if (updated) {
+        setDailyCodeInfo(updated);
+        setShowDailyCode(true);
+        playSuccessChime();
+      }
+    } finally {
+      setRotatingCode(false);
+    }
+  }
+
+  function handleCopyDailyCode() {
+    if (!dailyCodeInfo?.codigo) return;
+    navigator.clipboard.writeText(dailyCodeInfo.codigo);
+    setCopiedDailyCode(true);
+    setTimeout(() => setCopiedDailyCode(false), 2000);
+  }
+
+  function handleDeleteStudent(student) {
+    const confirmed = window.confirm(`Deseja realmente excluir o cadastro do aluno "${student.nome}" (Matrícula: ${student.matricula})?`);
+    if (!confirmed) return;
+    deleteStudentLocal(student.id);
+    playPinClick();
+  }
 
   function handleManualRelease() {
     if (!selectedStudentForManual || !manualReason.trim()) return;
@@ -69,7 +120,10 @@ export default function SchoolView({ onOpenStudentModal }) {
       return log.metodo?.includes('Familiar') || log.adultoParentesco?.includes('Mãe') || log.adultoParentesco?.includes('Pai');
     }
     if (logFilter === 'MANUAL') {
-      return log.metodo?.includes('Contingência') || log.metodo?.includes('Manual');
+      return log.metodo?.includes('Contingência') || log.metodo?.includes('Manual') || log.metodo?.includes('Código Secreto');
+    }
+    if (logFilter === 'ALERTS') {
+      return log.status === 'NEGADO' || log.status === 'BLOQUEADO';
     }
     return true;
   });
@@ -129,14 +183,16 @@ export default function SchoolView({ onOpenStudentModal }) {
     URL.revokeObjectURL(url);
   }
 
-  const releasedCount = new Set(exitLogs.map(l => l.studentId)).size;
+  const releasedLogs = exitLogs.filter(l => l.status === 'LIBERADO');
+  const alertLogsCount = exitLogs.filter(l => l.status === 'NEGADO' || l.status === 'BLOQUEADO').length;
+  const releasedCount = new Set(releasedLogs.map(l => l.studentId)).size;
   const totalCount = students.length;
   const remainingCount = Math.max(0, totalCount - releasedCount);
 
   return (
     <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
       {/* Title & Actions */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px' }}>
             Painel da Coordenação & Portaria
@@ -146,7 +202,7 @@ export default function SchoolView({ onOpenStudentModal }) {
           </h2>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <button
             id="btn-school-cadastrar-aluno"
             className="button-primary"
@@ -177,12 +233,105 @@ export default function SchoolView({ onOpenStudentModal }) {
         </div>
       </div>
 
+      {/* Card Exclusivo do Administrador: Código Secreto Diário */}
+      <div className="card-glass" style={{
+        marginBottom: '22px',
+        border: '1.5px solid rgba(245, 158, 11, 0.45)',
+        background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(15, 20, 34, 0.9) 100%)',
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '16px'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{
+            width: '48px',
+            height: '48px',
+            borderRadius: '12px',
+            background: 'rgba(245, 158, 11, 0.2)',
+            border: '1px solid rgba(245, 158, 11, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}>
+            <KeyRound size={24} color="#fbbf24" />
+          </div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <strong style={{ fontSize: '1rem', color: '#fff' }}>
+                Código Secreto Diário de Liberação (Funcionário / Admin)
+              </strong>
+              <span style={{ fontSize: '0.68rem', background: 'rgba(245, 158, 11, 0.25)', color: '#fde68a', padding: '2px 8px', borderRadius: '10px', fontWeight: 700 }}>
+                RENOVA DIARIAMENTE
+              </span>
+            </div>
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+              Permite que funcionários autorizados liberem alunos no Totem sem PIN ou biometria facial. {dailyCodeInfo?.expiraEm ? `Válido até ${dailyCodeInfo.expiraEm}.` : ''}
+            </p>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <div style={{
+            background: 'rgba(0, 0, 0, 0.45)',
+            border: '1px solid rgba(245, 158, 11, 0.4)',
+            borderRadius: '10px',
+            padding: '8px 16px',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '1.35rem',
+            fontWeight: 900,
+            letterSpacing: '3px',
+            color: '#fbbf24',
+            minWidth: '155px',
+            textAlign: 'center'
+          }}>
+            {showDailyCode ? (dailyCodeInfo?.codigo || '--------') : '••••••••'}
+          </div>
+
+          <button
+            id="btn-revelar-codigo-diario"
+            type="button"
+            className="button-secondary"
+            onClick={() => setShowDailyCode(!showDailyCode)}
+            style={{ padding: '8px 12px', fontSize: '0.8rem' }}
+          >
+            {showDailyCode ? <EyeOff size={15} /> : <Eye size={15} />}
+            <span>{showDailyCode ? 'Ocultar' : 'Consultar Código'}</span>
+          </button>
+
+          {showDailyCode && (
+            <button
+              type="button"
+              className="button-secondary"
+              onClick={handleCopyDailyCode}
+              style={{ padding: '8px 12px', fontSize: '0.8rem' }}
+            >
+              {copiedDailyCode ? <CheckCheck size={15} color="#10b981" /> : <Copy size={15} />}
+              <span>{copiedDailyCode ? 'Copiado!' : 'Copiar'}</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            className="button-secondary"
+            onClick={handleRotateDailyCode}
+            disabled={rotatingCode}
+            style={{ padding: '8px 12px', fontSize: '0.8rem', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#fca5a5' }}
+            title="Invalidar código atual e gerar outro código emergencial para hoje"
+          >
+            <RefreshCw size={14} />
+            <span>{rotatingCode ? 'Gerando...' : 'Regenerar'}</span>
+          </button>
+        </div>
+      </div>
+
       {/* KPI Cards */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
         gap: '16px',
-        marginBottom: '28px'
+        marginBottom: '22px'
       }}>
         {/* KPI 1 */}
         <div className="card-glass" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -220,7 +369,7 @@ export default function SchoolView({ onOpenStudentModal }) {
           </div>
           <div>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Saídas Liberadas Hoje</span>
-            <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--success)' }}>{exitLogs.length}</div>
+            <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--success)' }}>{releasedLogs.length}</div>
           </div>
         </div>
 
@@ -243,9 +392,52 @@ export default function SchoolView({ onOpenStudentModal }) {
             <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#fff' }}>{remainingCount}</div>
           </div>
         </div>
+
+        {/* KPI 4 */}
+        <div className="card-glass" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{
+            width: '48px',
+            height: '48px',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--danger-surface)',
+            color: 'var(--danger)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}>
+            <ShieldAlert size={24} />
+          </div>
+          <div>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Alertas / Tentativas Negadas</span>
+            <div style={{ fontSize: '1.6rem', fontWeight: 800, color: alertLogsCount > 0 ? '#f87171' : '#fff' }}>{alertLogsCount}</div>
+          </div>
+        </div>
       </div>
 
-      {/* Audit Log Table */}
+      {/* Navigation Tabs: Logs vs Alunos */}
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '18px' }}>
+        <button
+          type="button"
+          onClick={() => setActiveTab('logs')}
+          className={activeTab === 'logs' ? 'button-primary' : 'button-secondary'}
+          style={{ padding: '9px 18px', fontSize: '0.85rem' }}
+        >
+          <FileText size={16} />
+          <span>Histórico & Auditoria de Saídas</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('students')}
+          className={activeTab === 'students' ? 'button-primary' : 'button-secondary'}
+          style={{ padding: '9px 18px', fontSize: '0.85rem' }}
+        >
+          <GraduationCap size={16} />
+          <span>Gestão de Alunos & Matrículas ({students.length})</span>
+        </button>
+      </div>
+
+      {/* ABA 1: LOGS DE AUDITORIA */}
+      {activeTab === 'logs' && (
       <div className="card-glass">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px', flexWrap: 'wrap', gap: '12px' }}>
           <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -255,12 +447,13 @@ export default function SchoolView({ onOpenStudentModal }) {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             {/* Filter Buttons */}
-            <div style={{ display: 'flex', background: 'var(--bg-surface-elevated)', borderRadius: 'var(--radius-sm)', padding: '2px', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', background: 'var(--bg-surface-elevated)', borderRadius: 'var(--radius-sm)', padding: '2px', border: '1px solid var(--border-subtle)' }}>
               {[
                 { id: 'ALL', label: 'Todos' },
                 { id: 'FAMILY', label: '👨‍👩‍👧‍👦 Famílias' },
-                { id: 'VAN', label: '🚐 Vans Escolares' },
-                { id: 'MANUAL', label: '⚠️ Contingência' }
+                { id: 'VAN', label: '🚐 Vans' },
+                { id: 'MANUAL', label: '🔑 Código/Conting.' },
+                { id: 'ALERTS', label: '🚨 Negados' }
               ].map(f => (
                 <button
                   key={f.id}
@@ -390,8 +583,8 @@ export default function SchoolView({ onOpenStudentModal }) {
                     </td>
                     <td style={{ padding: '14px' }}>
                       <span style={{
-                        background: 'var(--success-surface)',
-                        color: 'var(--success)',
+                        background: (log.status === 'NEGADO' || log.status === 'BLOQUEADO') ? 'var(--danger-surface)' : 'var(--success-surface)',
+                        color: (log.status === 'NEGADO' || log.status === 'BLOQUEADO') ? '#f87171' : 'var(--success)',
                         padding: '4px 10px',
                         borderRadius: 'var(--radius-full)',
                         fontSize: '0.75rem',
@@ -444,6 +637,96 @@ export default function SchoolView({ onOpenStudentModal }) {
           </div>
         )}
       </div>
+      )}
+
+      {/* ABA 2: GESTÃO DE ALUNOS & MATRÍCULAS (EXCLUSIVO ESCOLA) */}
+      {activeTab === 'students' && (
+        <div className="card-glass">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+            <div>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <GraduationCap size={20} color="#06b6d4" />
+                <span>Base Oficial de Alunos, CPFs e Matrículas</span>
+              </h3>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                Estes dados são protegidos contra edição no aplicativo dos pais. Somente a coordenação/secretaria altera matrícula ou CPF.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="button-primary"
+              onClick={onOpenStudentModal}
+              style={{ padding: '8px 14px', fontSize: '0.82rem' }}
+            >
+              <span>+ Novo Aluno</span>
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '12px' }}>
+            {students.map(stu => (
+              <div key={stu.id} style={{
+                background: 'var(--bg-surface-elevated)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <img
+                    src={stu.foto}
+                    alt={stu.nome}
+                    style={{ width: '48px', height: '48px', borderRadius: '10px', objectFit: 'cover', border: '1.5px solid #06b6d4' }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <strong style={{ color: '#fff', fontSize: '0.92rem', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {stu.nome}
+                    </strong>
+                    <span style={{ fontSize: '0.74rem', color: '#38bdf8', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                      Matrícula: {stu.matricula} • CPF: {stu.cpf || 'N/A'}
+                    </span>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      {stu.turma} • {stu.sala || 'Sala 01'} ({stu.turno})
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '8px' }}>
+                  Responsáveis ativos ({stu.responsaveis?.length || 0}):{' '}
+                  <span style={{ color: '#cbd5e1' }}>
+                    {stu.responsaveis?.map(r => r.nome.split(' ')[0]).join(', ') || 'Nenhum'}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() => {
+                      setEditingStudent(stu);
+                      setIsEditStudentOpen(true);
+                    }}
+                    style={{ padding: '5px 10px', fontSize: '0.74rem' }}
+                  >
+                    <Edit3 size={13} />
+                    <span>Editar Dados</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() => handleDeleteStudent(stu)}
+                    style={{ padding: '5px 10px', fontSize: '0.74rem', borderColor: 'rgba(239, 68, 68, 0.35)', color: '#f87171' }}
+                  >
+                    <Trash2 size={13} />
+                    <span>Excluir</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Contingency Modal */}
       {manualModalOpen && (
@@ -530,6 +813,20 @@ export default function SchoolView({ onOpenStudentModal }) {
         isOpen={isTermViewerOpen}
         onClose={() => setIsTermViewerOpen(false)}
         authorization={selectedAuthForTerm}
+      />
+
+      {/* Modal to Edit Protected Student Records */}
+      <StudentModal
+        isOpen={isEditStudentOpen}
+        onClose={() => {
+          setIsEditStudentOpen(false);
+          setEditingStudent(null);
+        }}
+        editingStudent={editingStudent}
+        onSaved={() => {
+          setStudents(getStudents());
+          setEditingStudent(null);
+        }}
       />
     </div>
   );

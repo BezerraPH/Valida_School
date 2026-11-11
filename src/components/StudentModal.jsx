@@ -5,21 +5,23 @@ import {
 } from 'lucide-react';
 import { 
   startCameraStream, stopCameraStream, detectFaceAndComputeDescriptor, 
-  getVideoDevices 
+  getVideoDevices, captureVideoFrameDataUrl 
 } from '../services/faceService';
-import { addStudent, getStudents, generatePinForStudent } from '../services/storage';
+import { addStudent, updateStudentLocal, getStudents, generatePinForStudent } from '../services/storage';
 import { playSuccessChime } from '../services/audioService';
 
-export default function StudentModal({ isOpen, onClose, onSaved }) {
+export default function StudentModal({ isOpen, onClose, onSaved, editingStudent = null }) {
   const [nome, setNome] = useState('');
   const [matricula, setMatricula] = useState('');
   const [cpf, setCpf] = useState('');
+  const [sala, setSala] = useState('Sala 01');
   const [turma, setTurma] = useState('5º Ano - Fundamental I');
   const [turno, setTurno] = useState('Tarde');
   const [fotoAluno, setFotoAluno] = useState('https://images.unsplash.com/photo-1544717305-2782549b5136?w=240&auto=format&fit=crop&q=80');
 
   // Responsável Inicial
   const [respNome, setRespNome] = useState('');
+  const [respCpf, setRespCpf] = useState('');
   const [respParentesco, setRespParentesco] = useState('Pai/Mãe');
   const [respTelefone, setRespTelefone] = useState('');
   const [respFoto, setRespFoto] = useState('');
@@ -43,18 +45,29 @@ export default function StudentModal({ isOpen, onClose, onSaved }) {
 
   useEffect(() => {
     if (isOpen) {
-      // Auto-generate next matricula
-      const current = getStudents();
-      const nextNum = (current.length + 1).toString().padStart(2, '0');
-      setMatricula(`2026${nextNum}`);
+      if (editingStudent) {
+        setNome(editingStudent.nome || '');
+        setMatricula(editingStudent.matricula || '');
+        setCpf(editingStudent.cpf || '');
+        setTurma(editingStudent.turma || '5º Ano - Fundamental I');
+        setSala(editingStudent.sala || 'Sala 01');
+        setTurno(editingStudent.turno || 'Tarde');
+        setFotoAluno(editingStudent.foto || 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=240&auto=format&fit=crop&q=80');
+      } else {
+        const current = getStudents();
+        const nextNum = (current.length + 1).toString().padStart(2, '0');
+        setMatricula(`2026${nextNum}`);
 
-      setNome('');
-      setCpf('');
-      setTurma('5º Ano - Fundamental I');
-      setTurno('Tarde');
-      setFotoAluno('https://images.unsplash.com/photo-1544717305-2782549b5136?w=240&auto=format&fit=crop&q=80');
+        setNome('');
+        setCpf('');
+        setTurma('5º Ano - Fundamental I');
+        setSala('Sala 01');
+        setTurno('Tarde');
+        setFotoAluno('https://images.unsplash.com/photo-1544717305-2782549b5136?w=240&auto=format&fit=crop&q=80');
+      }
 
       setRespNome('');
+      setRespCpf('');
       setRespParentesco('Pai/Mãe');
       setRespTelefone('');
       setRespFoto('');
@@ -74,7 +87,7 @@ export default function StudentModal({ isOpen, onClose, onSaved }) {
 
     return () => stopCamera();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
+  }, [isOpen, editingStudent]);
 
   // Restart camera if target or camera device changes while capturing
   useEffect(() => {
@@ -121,14 +134,9 @@ export default function StudentModal({ isOpen, onClose, onSaved }) {
     setErrorMsg('');
 
     try {
-      const canvas = document.createElement('canvas');
-      canvas.width = videoRef.current.videoWidth || 640;
-      canvas.height = videoRef.current.videoHeight || 480;
-      const ctx = canvas.getContext('2d');
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      const photoUrl = canvas.toDataURL('image/jpeg', 0.85);
+      const snapped = captureVideoFrameDataUrl(videoRef.current, true);
+      if (!snapped) return;
+      const { canvas, dataUrl: photoUrl } = snapped;
 
       if (capturingFor === 'student') {
         setFotoAluno(photoUrl);
@@ -201,14 +209,31 @@ export default function StudentModal({ isOpen, onClose, onSaved }) {
       return;
     }
 
+    if (editingStudent) {
+      const updated = updateStudentLocal(editingStudent.id, {
+        nome: nome.trim(),
+        matricula: matricula.trim(),
+        cpf: cpf.trim() || null,
+        turma,
+        sala: sala.trim() || 'Sala 01',
+        turno,
+        foto: fotoAluno
+      });
+      playSuccessChime();
+      if (onSaved) onSaved(updated);
+      onClose();
+      return;
+    }
+
     const responsaveisList = [];
     if (respNome.trim()) {
       responsaveisList.push({
         id: 'resp-' + Date.now(),
         nome: respNome.trim(),
         parentesco: respParentesco,
+        tipo: 'LEGAL',
         telefone: respTelefone.trim() || '(11) 99999-9999',
-        cpf: 'Não informado',
+        cpf: respCpf.trim() || 'Não informado',
         foto: respFoto || 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=240&auto=format&fit=crop&q=80',
         biometriaCadastrada: !!respDescriptor,
         faceDescriptor: respDescriptor || null
@@ -222,7 +247,7 @@ export default function StudentModal({ isOpen, onClose, onSaved }) {
       cpf: cpf.trim() || '00000000000',
       turma,
       turno,
-      sala: 'Sala 01',
+      sala: sala.trim() || 'Sala 01',
       foto: fotoAluno || 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=240&auto=format&fit=crop&q=80',
       responsaveis: responsaveisList
     };
@@ -263,10 +288,12 @@ export default function StudentModal({ isOpen, onClose, onSaved }) {
             </div>
             <div>
               <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#fff' }}>
-                Cadastrar Novo Aluno
+                {editingStudent ? 'Editar Dados da Matrícula (Escola)' : 'Cadastrar Novo Aluno'}
               </h3>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                Adicione o estudante e vincule um responsável autorizado com biometria facial
+                {editingStudent
+                  ? 'Atualize matrícula, CPF, turma ou sala do aluno na base oficial da escola'
+                  : 'Adicione o estudante e vincule um responsável autorizado com biometria facial'}
               </p>
             </div>
           </div>
@@ -566,6 +593,51 @@ export default function StudentModal({ isOpen, onClose, onSaved }) {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
                   <div>
                     <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                      CPF do Aluno (Opcional / Totem):
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="000.000.000-00"
+                      value={cpf}
+                      onChange={e => setCpf(e.target.value)}
+                      style={{
+                        width: '100%',
+                        background: 'var(--bg-surface)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-xs)',
+                        padding: '8px 12px',
+                        color: '#fff',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: '0.85rem'
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                      Sala de Aula:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: Sala 04"
+                      value={sala}
+                      onChange={e => setSala(e.target.value)}
+                      style={{
+                        width: '100%',
+                        background: 'var(--bg-surface)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-xs)',
+                        padding: '8px 12px',
+                        color: '#fff',
+                        fontSize: '0.85rem'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
                       Turma / Série:
                     </label>
                     <select
@@ -646,20 +718,21 @@ export default function StudentModal({ isOpen, onClose, onSaved }) {
                 </div>
               </div>
 
-              {/* Section 2: Responsável Inicial Autorizado */}
+              {/* Section 2: Responsável Inicial Autorizado (apenas na criação) */}
+              {!editingStudent && (
               <div style={{ background: 'var(--bg-surface-elevated)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', padding: '16px' }}>
                 <span style={{ fontSize: '0.75rem', color: 'var(--success)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '10px' }}>
-                  2. Responsável Autorizado (com Biometria Facial)
+                  2. Responsável Legal Autorizado (com Biometria Facial)
                 </span>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
                   <div>
                     <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                      Nome do Adulto que vai buscar:
+                      Nome do Responsável Legal:
                     </label>
                     <input
                       type="text"
-                      placeholder="Ex: Pedro Alvares / Maria Silva"
+                      placeholder="Ex: Ana Silva Pereira"
                       value={respNome}
                       onChange={e => setRespNome(e.target.value)}
                       style={{
@@ -670,6 +743,49 @@ export default function StudentModal({ isOpen, onClose, onSaved }) {
                         padding: '8px 12px',
                         color: '#fff',
                         fontSize: '0.88rem'
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                      CPF do Responsável:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="000.000.000-00"
+                      value={respCpf}
+                      onChange={e => setRespCpf(e.target.value)}
+                      style={{
+                        width: '100%',
+                        background: 'var(--bg-surface)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-xs)',
+                        padding: '8px 12px',
+                        color: '#fff',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: '0.85rem'
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                      WhatsApp / Telefone:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="(11) 98765-4321"
+                      value={respTelefone}
+                      onChange={e => setRespTelefone(e.target.value)}
+                      style={{
+                        width: '100%',
+                        background: 'var(--bg-surface)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-xs)',
+                        padding: '8px 12px',
+                        color: '#fff',
+                        fontSize: '0.85rem'
                       }}
                     />
                   </div>
@@ -693,10 +809,6 @@ export default function StudentModal({ isOpen, onClose, onSaved }) {
                     >
                       <option value="Pai/Mãe">Pai / Mãe</option>
                       <option value="Responsável Legal">Responsável Legal</option>
-                      <option value="Avô/Avó">Avô / Avó</option>
-                      <option value="Tio/Tia">Tio / Tia</option>
-                      <option value="Motorista da Van">Motorista da Van</option>
-                      <option value="Outro Autorizado">Outro Autorizado</option>
                     </select>
                   </div>
                 </div>
@@ -747,6 +859,7 @@ export default function StudentModal({ isOpen, onClose, onSaved }) {
                   </div>
                 </div>
               </div>
+              )}
             </div>
 
             {/* Modal Actions */}
@@ -769,7 +882,7 @@ export default function StudentModal({ isOpen, onClose, onSaved }) {
                 }}
               >
                 <Check size={18} />
-                <span>Cadastrar Aluno & Salvar</span>
+                <span>{editingStudent ? 'Salvar Alterações' : 'Cadastrar Aluno & Salvar'}</span>
               </button>
             </div>
           </>

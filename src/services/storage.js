@@ -1,8 +1,9 @@
 // LocalStorage Database & State Manager with Central Server Sync (Valida School)
 import { 
-  initWebSocket, fetchStudentsFromApi, createStudentApi, 
-  updateBiometricsApi, generatePinApi, generateFamilyPinApi,
-  revokeAuthorizationApi, registerExitApi, fetchLogsFromApi 
+  initWebSocket, fetchStudentsFromApi, createStudentApi, updateStudentApi, deleteStudentApi,
+  updateBiometricsApi, updateGuardianProfileApi, generatePinApi, generateFamilyPinApi,
+  addThirdPartyAuthorizationApi, updateAuthorizationApi, revokeAuthorizationApi,
+  registerExitApi, fetchLogsFromApi 
 } from './apiService';
 
 const STORAGE_KEY_STUDENTS = 'valida_school_students';
@@ -227,9 +228,120 @@ export function addAuthorizedAdult(studentId, adultData) {
   const student = students.find(s => s.id === studentId);
   if (!student) return null;
 
-  student.responsaveis.push(adultData);
+  const authId = adultData.authId || `auth-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const enriched = {
+    authId,
+    tipo: adultData.tipo || 'TERCEIRO',
+    status: adultData.status || 'ATIVO',
+    validadeTipo: adultData.validadeTipo || 'ANUAL',
+    ...adultData
+  };
+
+  student.responsaveis.push(enriched);
   saveStudents(students);
+
+  addThirdPartyAuthorizationApi({
+    alunoIds: [studentId],
+    adulto: {
+      id: enriched.id,
+      nome: enriched.nome,
+      cpf: enriched.cpf === 'Não informado' ? null : enriched.cpf,
+      telefone: enriched.telefone || '(11) 99999-9999',
+      foto: enriched.foto,
+      faceDescriptor: enriched.faceDescriptor,
+      isTransportador: enriched.parentesco?.toLowerCase().includes('van')
+    },
+    parentesco: enriched.parentesco || 'Autorizado',
+    validadeTipo: enriched.validadeTipo || 'ANUAL',
+    criadoPorNome: 'Cadastro Facial Rápido'
+  }).catch(() => {});
+
   return student;
+}
+
+export function updateStudentLocal(studentId, updates) {
+  const students = getStudents();
+  const idx = students.findIndex(s => s.id === studentId);
+  if (idx === -1) return null;
+
+  students[idx] = { ...students[idx], ...updates };
+  saveStudents(students);
+  updateStudentApi(studentId, updates).catch(() => {});
+  return students[idx];
+}
+
+export function deleteStudentLocal(studentId) {
+  const students = getStudents().filter(s => s.id !== studentId);
+  saveStudents(students);
+  deleteStudentApi(studentId).catch(() => {});
+}
+
+export function updateGuardianProfileLocal(adultId, updates) {
+  const students = getStudents();
+  let modified = false;
+
+  for (const s of students) {
+    if (!Array.isArray(s.responsaveis)) continue;
+    for (let i = 0; i < s.responsaveis.length; i++) {
+      if (s.responsaveis[i].id === adultId) {
+        const hasDesc = Array.isArray(updates.faceDescriptor) && updates.faceDescriptor.length > 0;
+        s.responsaveis[i] = {
+          ...s.responsaveis[i],
+          telefone: updates.telefone !== undefined ? updates.telefone : s.responsaveis[i].telefone,
+          email: updates.email !== undefined ? updates.email : s.responsaveis[i].email,
+          foto: updates.foto !== undefined ? updates.foto : s.responsaveis[i].foto,
+          faceDescriptor: hasDesc ? updates.faceDescriptor : s.responsaveis[i].faceDescriptor,
+          biometriaCadastrada: hasDesc ? true : s.responsaveis[i].biometriaCadastrada
+        };
+        modified = true;
+      }
+    }
+  }
+
+  if (modified) {
+    saveStudents(students);
+  }
+  updateGuardianProfileApi(adultId, updates).catch(() => {});
+}
+
+export function updateThirdPartyAuthorizationLocal(authId, adultId, updates) {
+  const students = getStudents();
+  let modified = false;
+
+  for (const s of students) {
+    if (!Array.isArray(s.responsaveis)) continue;
+    for (let i = 0; i < s.responsaveis.length; i++) {
+      const r = s.responsaveis[i];
+      if ((authId && r.authId === authId) || (adultId && r.id === adultId)) {
+        if (r.tipo === 'LEGAL') continue;
+        const hasDesc = Array.isArray(updates.faceDescriptor) && updates.faceDescriptor.length > 0;
+        s.responsaveis[i] = {
+          ...r,
+          nome: updates.nome ?? r.nome,
+          cpf: updates.cpf ?? r.cpf,
+          telefone: updates.telefone ?? r.telefone,
+          parentesco: updates.parentesco ?? r.parentesco,
+          validadeTipo: updates.validadeTipo ?? r.validadeTipo,
+          validadeAte: updates.validadeAte !== undefined ? updates.validadeAte : r.validadeAte,
+          foto: updates.foto !== undefined ? updates.foto : r.foto,
+          faceDescriptor: hasDesc ? updates.faceDescriptor : r.faceDescriptor,
+          biometriaCadastrada: hasDesc ? true : r.biometriaCadastrada,
+          isTransportador: updates.isTransportador !== undefined ? updates.isTransportador : r.isTransportador,
+          tipo: updates.isTransportador ? 'VAN' : 'TERCEIRO',
+          vanEmpresa: updates.vanEmpresa !== undefined ? updates.vanEmpresa : r.vanEmpresa,
+          vanPlaca: updates.vanPlaca !== undefined ? updates.vanPlaca : r.vanPlaca
+        };
+        modified = true;
+      }
+    }
+  }
+
+  if (modified) {
+    saveStudents(students);
+  }
+  if (authId) {
+    updateAuthorizationApi(authId, updates).catch(() => {});
+  }
 }
 
 export function updateAdultBiometrics(studentId, adultId, photo, faceDescriptor) {
@@ -285,11 +397,11 @@ export function generateFamilyPin(studentIds, criadoPor = 'App Responsável') {
   localStorage.setItem(STORAGE_KEY_PINS, JSON.stringify(filtered));
   notifyStorageChange();
 
-  // Propaga geração para o servidor central e WebSockets
+  // Propaga geração para o servidor central com o MESMO código gerado (evita dessincronia)
   if (studentIds.length > 1) {
-    generateFamilyPinApi(studentIds, criadoPor).catch(() => {});
+    generateFamilyPinApi(studentIds, criadoPor, code).catch(() => {});
   } else {
-    generatePinApi(studentIds[0], criadoPor).catch(() => {});
+    generatePinApi(studentIds[0], criadoPor, code).catch(() => {});
   }
 
   return newPin;
@@ -305,7 +417,7 @@ export function getActivePinForStudent(studentId) {
   ) || null;
 }
 
-export function revokeAuthorizationLocal(authId) {
+export function revokeAuthorizationLocal(authId, permanent = false) {
   const students = getStudents();
   let modified = false;
 
@@ -313,7 +425,12 @@ export function revokeAuthorizationLocal(authId) {
     if (s.responsaveis) {
       const idx = s.responsaveis.findIndex(r => r.authId === authId || r.id === authId);
       if (idx !== -1) {
-        s.responsaveis[idx].status = 'REVOGADO';
+        if (s.responsaveis[idx].tipo === 'LEGAL') continue;
+        if (permanent) {
+          s.responsaveis.splice(idx, 1);
+        } else {
+          s.responsaveis[idx].status = 'REVOGADO';
+        }
         modified = true;
       }
     }
@@ -322,7 +439,7 @@ export function revokeAuthorizationLocal(authId) {
   if (modified) {
     saveStudents(students);
   }
-  revokeAuthorizationApi(authId).catch(() => {});
+  revokeAuthorizationApi(authId, permanent).catch(() => {});
 }
 
 const STORAGE_KEY_ATTEMPTS = 'valida_school_pin_attempts';
@@ -407,7 +524,7 @@ export function validatePinForStudent(studentId, enteredPin) {
   const pins = getPins();
   const now = Date.now();
   const index = pins.findIndex(p => 
-    p.studentId === studentId && 
+    (p.studentId === studentId || (Array.isArray(p.studentIds) && p.studentIds.includes(studentId))) && 
     p.code === enteredPin && 
     !p.used && 
     p.expiresAt > now
@@ -452,7 +569,10 @@ export function validatePinForStudent(studentId, enteredPin) {
 
 export function consumePin(studentId, enteredPin) {
   const pins = getPins();
-  const pin = pins.find(p => p.studentId === studentId && p.code === enteredPin);
+  const pin = pins.find(p => 
+    (p.studentId === studentId || (Array.isArray(p.studentIds) && p.studentIds.includes(studentId))) && 
+    p.code === enteredPin
+  );
   if (pin) {
     pin.used = true;
     localStorage.setItem(STORAGE_KEY_PINS, JSON.stringify(pins));
@@ -479,10 +599,10 @@ export function getExitLogs() {
   }
 }
 
-export function recordExitLog(logEntry) {
+export function recordExitLog(logEntry, syncToServer = true) {
   const logs = getExitLogs();
   const entry = {
-    id: 'log-' + Date.now(),
+    id: 'log-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5),
     timestamp: new Date().toISOString(),
     status: 'LIBERADO',
     ...logEntry
@@ -491,8 +611,10 @@ export function recordExitLog(logEntry) {
   localStorage.setItem(STORAGE_KEY_LOGS, JSON.stringify(logs));
   notifyStorageChange();
 
-  // Sincroniza log com o servidor e emite evento em tempo real
-  registerExitApi(entry.studentId, null, entry).catch(() => {});
+  // Sincroniza log com o servidor apenas quando ainda não foi persistido diretamente pela API
+  if (syncToServer) {
+    registerExitApi(entry.studentId, null, entry).catch(() => {});
+  }
 
   return entry;
 }
@@ -528,9 +650,11 @@ if (typeof window !== 'undefined') {
 
   initWebSocket((event) => {
     if ([
-      'NOVO_ALUNO', 'BIOMETRIA_ATUALIZADA', 'PIN_GERADO', 
+      'NOVO_ALUNO', 'ALUNO_ATUALIZADO', 'ALUNO_REMOVIDO',
+      'BIOMETRIA_ATUALIZADA', 'PERFIL_ATUALIZADO', 'PIN_GERADO', 
       'ALUNO_LIBERADO', 'ALERTA_SEGURANCA', 
-      'AUTORIZACAO_CRIADA', 'AUTORIZACAO_REVOGADA', 'VAN_LOTE_LIBERADO'
+      'AUTORIZACAO_CRIADA', 'AUTORIZACAO_ATUALIZADA', 'AUTORIZACAO_REVOGADA', 
+      'VAN_LOTE_LIBERADO', 'CODIGO_DIARIO_ATUALIZADO'
     ].includes(event.type)) {
       fetchStudentsFromApi().then(stus => {
         if (stus && stus.length > 0) {

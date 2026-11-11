@@ -4,7 +4,7 @@ import {
   XCircle, AlertCircle, RefreshCw, Delete, ArrowRight, Check,
   Maximize2, Minimize2, Clock, UserPlus,
   ShieldAlert, GraduationCap, Bus, Users, CheckSquare, Square,
-  CheckCheck
+  CheckCheck, KeyRound, Video
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { 
@@ -13,7 +13,8 @@ import {
 } from '../services/storage';
 import { 
   startCameraStream, stopCameraStream, detectAllFacesAndComputeDescriptors,
-  findBestAuthorizedMatchFromMultiple, getVideoDevices, MIN_SIMILARITY_THRESHOLD 
+  findBestAuthorizedMatchFromMultiple, getVideoDevices, captureVideoFrameDataUrl,
+  MIN_SIMILARITY_THRESHOLD 
 } from '../services/faceService';
 import { 
   playPinClick, playScanRadar, playCountdownTick, 
@@ -21,7 +22,7 @@ import {
 } from '../services/audioService';
 import { 
   validatePinApi, registerExitApi, fetchVanRosterApi, 
-  registerBatchVanReleaseApi 
+  registerBatchVanReleaseApi, validateDailySecretCodeApi 
 } from '../services/apiService';
 import RegisterModal from './RegisterModal';
 import StudentModal from './StudentModal';
@@ -74,9 +75,16 @@ export default function TotemView() {
   const [videoDevices, setVideoDevices] = useState([]);
   const [selectedCameraId, setSelectedCameraId] = useState(() => localStorage.getItem('valida_school_preferred_camera') || '');
 
-  // Modals accessible from Totem
+  // Modals accessible from Totem & Liberação Administrativa (Código Secreto Diário)
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
+  const [isAdminCodeOpen, setIsAdminCodeOpen] = useState(false);
+  const [adminDailyCode, setAdminDailyCode] = useState('');
+  const [adminOperatorName, setAdminOperatorName] = useState('');
+  const [adminReason, setAdminReason] = useState('');
+  const [adminTargetQuery, setAdminTargetQuery] = useState('');
+  const [isSubmittingAdminCode, setIsSubmittingAdminCode] = useState(false);
+  const [facialAttempts, setFacialAttempts] = useState(0);
 
   // Active key state for visual keyboard feedback
   const [pressedKey, setPressedKey] = useState(null);
@@ -86,6 +94,7 @@ export default function TotemView() {
   const streamRef = useRef(null);
   const scanIntervalRef = useRef(null);
   const countdownTimerRef = useRef(null);
+  const autoCountdownActiveRef = useRef(false);
 
   // Timer de desbloqueio preventivo (Rate Limit)
   useEffect(() => {
@@ -147,6 +156,7 @@ export default function TotemView() {
           }
         }
       } else if (step === 'pin') {
+        if (isLockedOut) return;
         if (key === 'backspace' || key === 'Backspace') {
           setEnteredPin(prev => prev.slice(0, -1));
         } else if (key === 'enter' || key === 'Enter') {
@@ -177,10 +187,10 @@ export default function TotemView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, searchQuery, enteredPin, flowMode, vanStep, driverSearchQuery]);
 
-  // Global physical keyboard listener
+    // Global physical keyboard listener
   useEffect(() => {
     function onKeyDown(e) {
-      if (isRegisterOpen || isStudentModalOpen) return;
+      if (isRegisterOpen || isStudentModalOpen || isAdminCodeOpen) return;
       if (['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'Backspace', 'Enter', 'Escape'].includes(e.key)) {
         if (e.key === 'Escape') {
           handleResetFlow();
@@ -192,7 +202,7 @@ export default function TotemView() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleKeyPress, isRegisterOpen, isStudentModalOpen]);
+  }, [handleKeyPress, isRegisterOpen, isStudentModalOpen, isAdminCodeOpen]);
 
   function handleDemoSelect(student) {
     playPinClick();
@@ -302,6 +312,8 @@ export default function TotemView() {
 
     try {
       const data = await fetchVanRosterApi(query);
+      let resolvedDriver = data?.driver || null;
+
       if (!data || !data.driver) {
         // Fallback local buscando em responsaveis que sao transportadores
         const allStudents = getStudents();
@@ -329,6 +341,7 @@ export default function TotemView() {
           s.responsaveis?.some(r => (r.id === foundDriver.id || r.cpf === foundDriver.cpf) && r.status !== 'REVOGADO')
         );
 
+        resolvedDriver = foundDriver;
         setVanDriver(foundDriver);
         setVanRoster(roster);
         setSelectedVanStudentIds(roster.map(r => r.id));
@@ -341,7 +354,7 @@ export default function TotemView() {
       setErrorMsg('');
       setVanStep('van_facial');
       playPinClick();
-      speakVoice(`Motorista ${vanDriver?.nome?.split(' ')[0] || 'da Van'} identificado. Valide sua biometria facial.`);
+      speakVoice(`Motorista ${resolvedDriver?.nome?.split(' ')[0] || 'da Van'} identificado. Valide sua biometria facial.`);
     } catch {
       setErrorMsg('Erro ao consultar van escolar.');
       playErrorBuzzer();
@@ -372,7 +385,7 @@ export default function TotemView() {
         'Portão Principal - Van Escolar'
       );
 
-      // Atualiza também os logs locais para exibição imediata
+      // Atualiza também os logs locais sem reenviar duplicado para API
       const releasedStudents = vanRoster.filter(s => selectedVanStudentIds.includes(s.id));
       releasedStudents.forEach(stu => {
         recordExitLog({
@@ -387,7 +400,7 @@ export default function TotemView() {
           similaridadeBiometrica: `${matchScore || 98}%`,
           metodo: 'Modo Van Escolar: Embarque Coletivo com Biometria Única do Motorista',
           status: 'LIBERADO'
-        });
+        }, false);
       });
 
       setVanBatchResult({
@@ -438,7 +451,7 @@ export default function TotemView() {
       let consecutiveFramesWithFace = 0;
 
       scanIntervalRef.current = setInterval(async () => {
-        if (!videoRef.current || autoCountdown !== null) return;
+        if (!videoRef.current || autoCountdownActiveRef.current) return;
 
         try {
           const detections = await detectAllFacesAndComputeDescriptors(videoRef.current);
@@ -453,8 +466,8 @@ export default function TotemView() {
               setLivenessVerified(true);
             }
 
-            // Inicia countdown se detectou rosto estável por 3 frames e piscou
-            if (consecutiveFramesWithFace >= 3 && autoCountdown === null) {
+            // Inicia countdown se detectou rosto estável por 3 frames
+            if (consecutiveFramesWithFace >= 3 && !autoCountdownActiveRef.current) {
               setLivenessVerified(true);
               triggerAutoCountdown();
             }
@@ -469,12 +482,13 @@ export default function TotemView() {
 
     } catch (err) {
       console.warn('Erro ao inicializar câmera do Totem:', err);
-      setErrorMsg('Câmera indisponível. Verifique permissões do navegador.');
+      setErrorMsg(err.message || 'Câmera indisponível. Verifique permissões do navegador.');
       setIsScanning(false);
     }
   }
 
   function triggerAutoCountdown() {
+    autoCountdownActiveRef.current = true;
     let count = 3;
     setAutoCountdown(count);
     playCountdownTick();
@@ -487,6 +501,7 @@ export default function TotemView() {
       } else {
         clearInterval(countdownTimerRef.current);
         countdownTimerRef.current = null;
+        autoCountdownActiveRef.current = false;
         setAutoCountdown(null);
         handleCaptureAndVerifyFace();
       }
@@ -500,19 +515,14 @@ export default function TotemView() {
     playScanRadar();
 
     try {
-      const canvas = document.createElement('canvas');
-      canvas.width = videoRef.current.videoWidth || 640;
-      canvas.height = videoRef.current.videoHeight || 480;
-      const ctx = canvas.getContext('2d');
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      const snapshotUrl = canvas.toDataURL('image/jpeg', 0.85);
+      const snapped = captureVideoFrameDataUrl(videoRef.current, true);
+      if (!snapped) return;
+      const { canvas, dataUrl: snapshotUrl } = snapped;
 
       const detections = await detectAllFacesAndComputeDescriptors(canvas);
 
       if (!detections || detections.length === 0) {
-        setErrorMsg('Nenhum rosto foi identificado com clareza. Mantenha o rosto parado na moldura.');
+        setErrorMsg('Nenhum rosto foi identificado com clareza. Mantenha o rosto parado na moldura e tente novamente.');
         playErrorBuzzer();
         setIsScanning(false);
         return;
@@ -520,10 +530,32 @@ export default function TotemView() {
 
       cleanupCamera();
       setCapturedAdultPhoto(snapshotUrl);
+      setFacialAttempts(prev => prev + 1);
 
       // SE ESTIVER EM MODO VAN ESCOLAR:
       if (flowMode === 'VAN') {
-        setMatchScore(98);
+        const hasDriverBio = Boolean(vanDriver?.biometriaCadastrada && vanDriver?.faceDescriptor);
+        if (!hasDriverBio) {
+          setErrorMsg('Motorista sem biometria facial gravada no sistema. Cadastre o rosto ou utilize o Código Secreto Diário.');
+          playErrorBuzzer();
+          speakVoice('Motorista sem biometria facial cadastrada.');
+          setIsScanning(false);
+          return;
+        }
+
+        const bestVan = findBestAuthorizedMatchFromMultiple(detections, [vanDriver]);
+        const isVanApproved = bestVan && bestVan.comparison && bestVan.comparison.similarity >= MIN_SIMILARITY_THRESHOLD;
+
+        if (!isVanApproved) {
+          const vanScore = bestVan?.comparison?.similarity ?? 0;
+          setErrorMsg(`Biometria do motorista não confirmada (${vanScore}% — mínimo ${MIN_SIMILARITY_THRESHOLD}%). Clique em Tentar Novamente ou troque a câmera.`);
+          playErrorBuzzer();
+          speakVoice('Rosto do motorista não reconhecido. Tente novamente.');
+          setIsScanning(false);
+          return;
+        }
+
+        setMatchScore(bestVan.comparison.similarity);
         setMatchedAdult(vanDriver);
         setVanStep('van_roster');
         playSuccessChime();
@@ -613,6 +645,7 @@ export default function TotemView() {
   }
 
   function cleanupCamera() {
+    autoCountdownActiveRef.current = false;
     if (countdownTimerRef.current) {
       clearInterval(countdownTimerRef.current);
       countdownTimerRef.current = null;
@@ -627,8 +660,91 @@ export default function TotemView() {
     }
   }
 
+  function handleRetryFacialScan() {
+    playPinClick();
+    setErrorMsg('');
+    if (flowMode === 'VAN') {
+      setVanStep('van_facial');
+    } else {
+      setStep('facial');
+    }
+    startFaceRecognition();
+  }
+
+  async function handleValidateDailyAdminCode(e) {
+    e.preventDefault();
+    setErrorMsg('');
+
+    let targetStudent = identifiedStudent;
+    if (!targetStudent && adminTargetQuery.trim()) {
+      targetStudent = findStudentByMatriculaOrCpf(adminTargetQuery.trim());
+    }
+    if (!targetStudent) {
+      setErrorMsg('Informe a matrícula ou CPF do aluno antes de aplicar o Código Diário.');
+      playErrorBuzzer();
+      return;
+    }
+
+    if (!adminDailyCode.trim()) {
+      setErrorMsg('Digite o Código Secreto Diário obtido no Painel da Coordenação.');
+      playErrorBuzzer();
+      return;
+    }
+
+    setIsSubmittingAdminCode(true);
+    try {
+      const res = await validateDailySecretCodeApi(
+        adminDailyCode.trim(),
+        targetStudent.id,
+        adminOperatorName.trim() || 'Funcionário da Escola',
+        adminReason.trim() || 'Liberação direta sem PIN/Biometria via Código Secreto Diário'
+      );
+
+      if (!res || !res.valid) {
+        setErrorMsg(res?.reason || 'Código Secreto Diário inválido ou expirado.');
+        playErrorBuzzer();
+        return;
+      }
+
+      if (res.log) {
+        recordExitLog(res.log, false);
+      }
+
+      setIdentifiedStudent(targetStudent);
+      setIdentifiedStudents([targetStudent]);
+      setMatchedAdult({
+        nome: adminOperatorName.trim() || 'Funcionário da Escola (Código Diário)',
+        parentesco: 'Liberação Administrativa Diária'
+      });
+      setMatchScore('BYPASS');
+      setCapturedAdultPhoto(targetStudent.foto);
+      setIsAdminCodeOpen(false);
+      setAdminDailyCode('');
+      setAdminOperatorName('');
+      setAdminReason('');
+      setFlowMode('NORMAL');
+      setStep('result');
+      playSuccessChime();
+      speakVoice(`Liberação administrativa confirmada para ${targetStudent.nome.split(' ')[0]}.`);
+
+      confetti({
+        particleCount: 100,
+        spread: 80,
+        origin: { y: 0.6 }
+      });
+    } finally {
+      setIsSubmittingAdminCode(false);
+    }
+  }
+
   // Liberação final pelo funcionário de portaria (Registra saída de 1 ou N alunos)
   function handleStaffConfirmRelease() {
+    if (matchScore === 'BYPASS') {
+      playSuccessChime();
+      handleResetFlow();
+      return;
+    }
+
     const studentsToRelease = identifiedStudents.length > 0 ? identifiedStudents : [identifiedStudent];
     
     // Consome PIN
@@ -654,8 +770,8 @@ export default function TotemView() {
     // Envia ao backend central para WebSocket de salas de aula e WhatsApp
     registerExitApi(studentsToRelease[0].id, enteredPin, batchLogs[0], batchLogs).catch(() => {});
 
-    // Salva localmente
-    batchLogs.forEach(logItem => recordExitLog(logItem));
+    // Salva localmente sem duplicar no servidor
+    batchLogs.forEach(logItem => recordExitLog(logItem, false));
 
     playSuccessChime();
     speakVoice('Saída confirmada e registrada com sucesso.');
@@ -702,6 +818,8 @@ export default function TotemView() {
       {/* Kiosk Enterprise Header */}
       <div style={{
         display: 'flex',
+        flexWrap: 'wrap',
+        gap: '12px',
         alignItems: 'center',
         justifyContent: 'space-between',
         borderBottom: '1px solid var(--border-subtle)',
@@ -739,7 +857,20 @@ export default function TotemView() {
         </div>
 
         {/* Live Clock & Action Buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            id="btn-codigo-diario-totem"
+            onClick={() => {
+              setAdminTargetQuery(searchQuery);
+              setIsAdminCodeOpen(true);
+            }}
+            className="button-secondary"
+            style={{ padding: '8px 12px', fontSize: '0.78rem', borderColor: 'rgba(245, 158, 11, 0.45)', color: '#fbbf24' }}
+            title="Liberação direta por funcionário com o Código Secreto Diário"
+          >
+            <KeyRound size={15} />
+            <span>Código Diário</span>
+          </button>
           <button
             onClick={() => setIsStudentModalOpen(true)}
             className="button-secondary"
@@ -1107,6 +1238,18 @@ export default function TotemView() {
                   <Check size={26} />
                 </button>
               </div>
+
+              <div style={{ textAlign: 'center', marginTop: '16px' }}>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => setIsAdminCodeOpen(true)}
+                  style={{ fontSize: '0.78rem', padding: '7px 14px', borderColor: 'rgba(245, 158, 11, 0.4)', color: '#fbbf24' }}
+                >
+                  <KeyRound size={14} />
+                  <span>Funcionário Autorizado? Liberar com Código Secreto Diário</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -1209,33 +1352,48 @@ export default function TotemView() {
                 </div>
               </div>
 
-              {videoDevices.length > 1 && (
-                <div style={{ display: 'flex', justifyContent: 'center', marginTop: '10px' }}>
+              {/* Seletor de Câmera Sempre Acessível */}
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
+                <Video size={15} color="#818cf8" />
+                {videoDevices.length > 0 ? (
                   <select
+                    id="select-totem-camera"
                     value={selectedCameraId}
                     onChange={(e) => {
                       setSelectedCameraId(e.target.value);
                       localStorage.setItem('valida_school_preferred_camera', e.target.value);
                     }}
                     style={{
-                      background: 'rgba(15, 23, 42, 0.8)',
-                      color: '#94a3b8',
+                      background: 'rgba(15, 23, 42, 0.9)',
+                      color: '#e2e8f0',
                       border: '1px solid var(--border-subtle)',
                       borderRadius: '8px',
-                      padding: '4px 10px',
-                      fontSize: '0.78rem'
+                      padding: '6px 12px',
+                      fontSize: '0.8rem'
                     }}
                   >
-                    {videoDevices.map(d => (
+                    {videoDevices.map((d, idx) => (
                       <option key={d.deviceId} value={d.deviceId}>
-                        📹 {d.label || `Câmera ${d.deviceId.slice(0, 6)}`}
+                        📹 {d.label || `Câmera ${idx + 1} (${d.deviceId.slice(0, 6)})`}
                       </option>
                     ))}
                   </select>
-                </div>
-              )}
+                ) : (
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Câmera Padrão do Dispositivo</span>
+                )}
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={handleRetryFacialScan}
+                  style={{ padding: '6px 10px', fontSize: '0.75rem' }}
+                  title="Reiniciar câmera e tentar novamente"
+                >
+                  <RefreshCw size={13} />
+                  <span>Reiniciar Câmera</span>
+                </button>
+              </div>
 
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '14px', marginTop: '18px' }}>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', marginTop: '16px', flexWrap: 'wrap' }}>
                 <button
                   type="button"
                   className="button-secondary"
@@ -1245,13 +1403,22 @@ export default function TotemView() {
                 </button>
                 <button
                   type="button"
+                  className="button-secondary"
+                  onClick={() => setIsAdminCodeOpen(true)}
+                  style={{ borderColor: 'rgba(245, 158, 11, 0.4)', color: '#fbbf24' }}
+                >
+                  <KeyRound size={16} />
+                  <span>Código Diário</span>
+                </button>
+                <button
+                  type="button"
                   className="button-primary"
                   onClick={handleCaptureAndVerifyFace}
                   disabled={isScanning}
                   style={{ padding: '12px 24px', fontSize: '0.95rem', opacity: isScanning ? 0.7 : 1 }}
                 >
                   <Camera size={18} />
-                  <span>{isScanning ? 'Analisando Biometria...' : 'Capturar Imediatamente (Manual)'}</span>
+                  <span>{isScanning ? 'Analisando Biometria...' : 'Capturar Agora'}</span>
                 </button>
               </div>
             </div>
@@ -1284,10 +1451,14 @@ export default function TotemView() {
                 </div>
 
                 <h3 style={{ fontSize: '1.8rem', fontWeight: 800, color: '#fff', marginBottom: '4px' }}>
-                  {isFamilyPin ? 'SAÍDA FAMILIAR AUTORIZADA!' : 'ALUNO LIBERADO PARA SAÍDA!'}
+                  {matchScore === 'BYPASS'
+                    ? 'LIBERAÇÃO ADMINISTRATIVA CONCLUÍDA!'
+                    : isFamilyPin ? 'SAÍDA FAMILIAR AUTORIZADA!' : 'ALUNO LIBERADO PARA SAÍDA!'}
                 </h3>
                 <p style={{ fontSize: '0.95rem', color: '#a7f3d0' }}>
-                  Autenticação biométrica aprovada com <strong>{matchScore}% de similaridade</strong> para {matchedAdult?.nome}.
+                  {matchScore === 'BYPASS'
+                    ? `Liberação direta validada via Código Secreto Diário por ${matchedAdult?.nome}.`
+                    : <>Autenticação biométrica aprovada com <strong>{matchScore}% de similaridade</strong> para {matchedAdult?.nome}.</>}
                 </p>
 
                 {/* Exibição dos Alunos Liberados (Cards dos Irmãos) */}
@@ -1400,18 +1571,26 @@ export default function TotemView() {
                   ACESSO NEGADO • ROSTO DIVERGENTE
                 </h3>
                 <p style={{ fontSize: '0.9rem', color: '#fca5a5' }}>
-                  A biometria facial capturada não atingiu o índice mínimo de similaridade com os responsáveis cadastrados.
+                  A biometria facial capturada não atingiu o índice mínimo de similaridade ({matchScore}% / exige {MIN_SIMILARITY_THRESHOLD}%). Tentativas realizadas: {facialAttempts}. Você pode trocar a câmera e tentar novamente.
                 </p>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', flexWrap: 'wrap' }}>
                 <button
                   className="button-primary"
-                  onClick={() => setStep('facial')}
+                  onClick={handleRetryFacialScan}
                   style={{ padding: '12px 24px' }}
                 >
                   <RefreshCw size={18} />
                   <span>Tentar Novamente</span>
+                </button>
+                <button
+                  className="button-secondary"
+                  onClick={() => setIsAdminCodeOpen(true)}
+                  style={{ padding: '12px 20px', borderColor: 'rgba(245, 158, 11, 0.45)', color: '#fbbf24' }}
+                >
+                  <KeyRound size={18} />
+                  <span>Liberar com Código Diário</span>
                 </button>
                 <button
                   className="button-secondary"
@@ -1576,7 +1755,44 @@ export default function TotemView() {
                 )}
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '14px', marginTop: '18px' }}>
+              {/* Seletor de Câmera e Tentar Novamente no Modo Van */}
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
+                <Video size={15} color="#fbbf24" />
+                {videoDevices.length > 0 && (
+                  <select
+                    value={selectedCameraId}
+                    onChange={(e) => {
+                      setSelectedCameraId(e.target.value);
+                      localStorage.setItem('valida_school_preferred_camera', e.target.value);
+                    }}
+                    style={{
+                      background: 'rgba(15, 23, 42, 0.9)',
+                      color: '#e2e8f0',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: '8px',
+                      padding: '6px 12px',
+                      fontSize: '0.8rem'
+                    }}
+                  >
+                    {videoDevices.map((d, idx) => (
+                      <option key={d.deviceId} value={d.deviceId}>
+                        📹 {d.label || `Câmera ${idx + 1}`}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={handleRetryFacialScan}
+                  style={{ padding: '6px 10px', fontSize: '0.75rem' }}
+                >
+                  <RefreshCw size={13} />
+                  <span>Tentar Novamente</span>
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '14px', marginTop: '16px', flexWrap: 'wrap' }}>
                 <button
                   type="button"
                   className="button-secondary"
@@ -1588,10 +1804,11 @@ export default function TotemView() {
                   type="button"
                   className="button-primary"
                   onClick={handleCaptureAndVerifyFace}
+                  disabled={isScanning}
                   style={{ padding: '12px 24px', background: '#f59e0b' }}
                 >
                   <Camera size={18} />
-                  <span>Capturar Biometria do Motorista</span>
+                  <span>{isScanning ? 'Validando...' : 'Capturar Biometria do Motorista'}</span>
                 </button>
               </div>
             </div>
@@ -1857,6 +2074,104 @@ export default function TotemView() {
           performStudentSearch(newStudent.matricula);
         }}
       />
+
+      {/* Modal de Liberação Administrativa com Código Secreto Diário */}
+      {isAdminCodeOpen && (
+        <div className="modal-backdrop" onClick={() => setIsAdminCodeOpen(false)}>
+          <div className="modal-card" style={{ maxWidth: '460px' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#fff', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <KeyRound size={20} color="#fbbf24" />
+              <span>Liberação Administrativa (Código Diário)</span>
+            </h3>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '16px', lineHeight: 1.4 }}>
+              Para funcionários autorizados pela coordenação liberarem a criança sem PIN ou biometria facial. O código muda automaticamente todos os dias no Painel da Coordenação.
+            </p>
+
+            <form onSubmit={handleValidateDailyAdminCode} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {!identifiedStudent ? (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                    Matrícula ou CPF do Aluno: *
+                  </label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="Ex: 202601 ou CPF"
+                    value={adminTargetQuery}
+                    onChange={e => setAdminTargetQuery(e.target.value)}
+                    required
+                  />
+                </div>
+              ) : (
+                <div style={{ background: 'rgba(99, 102, 241, 0.14)', border: '1px solid rgba(99, 102, 241, 0.35)', padding: '10px 12px', borderRadius: '8px', fontSize: '0.82rem', color: '#fff' }}>
+                  Aluno selecionado: <strong>{identifiedStudent.nome}</strong> (Matrícula: {identifiedStudent.matricula})
+                </div>
+              )}
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.78rem', color: '#fbbf24', fontWeight: 700, marginBottom: '4px' }}>
+                  Código Secreto Diário (8 dígitos): *
+                </label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  className="input-field"
+                  placeholder="Consulte no Painel da Coordenação"
+                  value={adminDailyCode}
+                  onChange={e => setAdminDailyCode(e.target.value)}
+                  style={{ fontFamily: 'var(--font-mono)', fontSize: '1.1rem', letterSpacing: '3px' }}
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                  Nome do Funcionário da Escola (Opcional):
+                </label>
+                <input
+                  type="text"
+                  className="input-field"
+                  placeholder="Ex: Inspetor Carlos / Coord. Fernanda"
+                  value={adminOperatorName}
+                  onChange={e => setAdminOperatorName(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                  Observação / Motivo (Opcional):
+                </label>
+                <input
+                  type="text"
+                  className="input-field"
+                  placeholder="Ex: Responsável sem celular / câmera indisponível"
+                  value={adminReason}
+                  onChange={e => setAdminReason(e.target.value)}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => setIsAdminCodeOpen(false)}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="button-primary"
+                  disabled={isSubmittingAdminCode}
+                  style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' }}
+                >
+                  <ShieldCheck size={16} />
+                  <span>{isSubmittingAdminCode ? 'Validando...' : 'Liberar Saída Agora'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -17,6 +17,7 @@ server/valida_school.db*
 data/
 .gemini/
 oxlint_output.txt
+*.exe
 
 # Editor directories and files
 .vscode/*

@@ -10,7 +10,7 @@ import StudentModal from './components/StudentModal';
 import { ShieldCheck, ArrowLeft, Camera, GraduationCap } from 'lucide-react';
 import { getStudents } from './services/storage';
 
-function ModuleNavigationWrapper({ children, title, onOpenRegisterFace, onOpenStudentModal }) {
+function ModuleNavigationWrapper({ children, title, onOpenRegisterFace, onOpenStudentModal, hideNewStudent = false, hideRegisterFace = false }) {
   const location = useLocation();
   const isKiosk = location.pathname === '/totem';
 
@@ -21,13 +21,15 @@ function ModuleNavigationWrapper({ children, title, onOpenRegisterFace, onOpenSt
         background: 'rgba(10, 13, 20, 0.95)',
         backdropFilter: 'blur(12px)',
         borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-        padding: '12px 24px',
+        padding: '10px 16px',
         display: 'flex',
+        flexWrap: 'wrap',
         alignItems: 'center',
         justifyContent: 'space-between',
+        gap: '10px',
         zIndex: 50
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <Link 
             to="/" 
             style={{
@@ -36,9 +38,9 @@ function ModuleNavigationWrapper({ children, title, onOpenRegisterFace, onOpenSt
               gap: '6px',
               color: '#94a3b8',
               textDecoration: 'none',
-              fontSize: '0.85rem',
+              fontSize: '0.82rem',
               fontWeight: 700,
-              padding: '6px 12px',
+              padding: '6px 10px',
               borderRadius: '8px',
               background: 'rgba(255, 255, 255, 0.05)',
               transition: 'all 0.2s ease'
@@ -46,57 +48,61 @@ function ModuleNavigationWrapper({ children, title, onOpenRegisterFace, onOpenSt
             title="Voltar ao Portal Hub"
           >
             <ArrowLeft size={16} />
-            <span>Hub Principal</span>
+            <span>Hub</span>
           </Link>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ color: 'rgba(255, 255, 255, 0.2)' }}>/</span>
-            <strong style={{ color: '#fff', fontSize: '0.95rem' }}>{title}</strong>
+            <strong style={{ color: '#fff', fontSize: '0.9rem' }}>{title}</strong>
           </div>
         </div>
 
         {/* Global Quick Action Buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <button
-            onClick={onOpenRegisterFace}
-            style={{
-              background: 'rgba(99, 102, 241, 0.15)',
-              border: '1px solid rgba(99, 102, 241, 0.35)',
-              color: '#c7d2fe',
-              padding: '6px 12px',
-              borderRadius: '8px',
-              fontSize: '0.8rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-          >
-            <Camera size={14} color="#818cf8" />
-            <span>Cadastrar Meu Rosto</span>
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {!hideRegisterFace && (
+            <button
+              onClick={onOpenRegisterFace}
+              style={{
+                background: 'rgba(99, 102, 241, 0.15)',
+                border: '1px solid rgba(99, 102, 241, 0.35)',
+                color: '#c7d2fe',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <Camera size={14} color="#818cf8" />
+              <span>Cadastrar Rosto</span>
+            </button>
+          )}
 
-          <button
-            onClick={onOpenStudentModal}
-            style={{
-              background: 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)',
-              border: 'none',
-              color: '#fff',
-              padding: '6px 14px',
-              borderRadius: '8px',
-              fontSize: '0.8rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              boxShadow: '0 2px 10px rgba(6, 182, 212, 0.3)'
-            }}
-          >
-            <GraduationCap size={14} />
-            <span>+ Novo Aluno</span>
-          </button>
+          {!hideNewStudent && (
+            <button
+              onClick={onOpenStudentModal}
+              style={{
+                background: 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)',
+                border: 'none',
+                color: '#fff',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 2px 10px rgba(6, 182, 212, 0.3)'
+              }}
+            >
+              <GraduationCap size={14} />
+              <span>+ Novo Aluno</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -157,10 +163,12 @@ export default function App() {
           element={
             <ModuleNavigationWrapper 
               title="App dos Pais (Responsável)"
+              hideNewStudent={true}
+              hideRegisterFace={true}
               onOpenRegisterFace={() => setIsRegisterModalOpen(true)}
               onOpenStudentModal={() => setIsStudentModalOpen(true)}
             >
-              <GuardianView onOpenStudentModal={() => setIsStudentModalOpen(true)} />
+              <GuardianView />
             </ModuleNavigationWrapper>
           } 
         />

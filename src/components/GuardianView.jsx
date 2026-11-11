@@ -1,29 +1,28 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
-  KeyRound, Shield, Clock, Plus, 
+  KeyRound, Clock, 
   Share2, Copy, CheckCheck, Bell,
   Home, Users, Settings, Wifi, Battery, Sparkles,
-  Bus, UserX, FileCheck, FileText, ChevronRight, CheckSquare, Square
+  Bus, UserX, FileCheck, FileText, ChevronRight, CheckSquare, Square,
+  Camera, Upload, Video, Lock, Edit3, Trash2, ScanFace, CheckCircle2, AlertCircle
 } from 'lucide-react';
 import { 
   getStudents, getActivePinForStudent, generatePinForStudent, 
-  generateFamilyPin, revokeAuthorizationLocal, subscribeStorage, getExitLogs 
+  generateFamilyPin, revokeAuthorizationLocal, updateGuardianProfileLocal,
+  subscribeStorage, getExitLogs 
 } from '../services/storage';
-import { playPinClick, playSuccessChime } from '../services/audioService';
+import {
+  startCameraStream, stopCameraStream, detectFaceAndComputeDescriptor,
+  compareDescriptors, getVideoDevices, captureVideoFrameDataUrl,
+  extractDescriptorFromImageUrl, MIN_SIMILARITY_THRESHOLD
+} from '../services/faceService';
+import { playPinClick, playSuccessChime, playErrorBuzzer } from '../services/audioService';
 import RegisterModal from './RegisterModal';
 import ThirdPartyModal from './ThirdPartyModal';
 import TermViewerModal from './TermViewerModal';
 
-export default function GuardianView({ onOpenStudentModal }) {
+export default function GuardianView() {
   const [students, setStudents] = useState(() => getStudents());
-  // Identifica os filhos da mãe logada (Ana Silva Pereira)
-  const loggedGuardian = {
-    id: 'resp-ana',
-    nome: 'Ana Silva Pereira',
-    cpf: '111.222.333-44',
-    telefone: '(11) 98765-4321',
-    parentesco: 'Mãe (Responsável Legal)'
-  };
 
   // Filhos vinculados a esta mãe
   const familyChildren = students.filter(s => 
@@ -32,6 +31,23 @@ export default function GuardianView({ onOpenStudentModal }) {
 
   // Se por acaso não achar nenhum (ex: storage vazio), pega os 2 primeiros
   const childrenList = familyChildren.length > 0 ? familyChildren : students.slice(0, 2);
+
+  // Busca dados atualizados da mãe logada direto do storage sincronizado
+  const storedAna = childrenList
+    .flatMap(c => c.responsaveis || [])
+    .find(r => r.id === 'resp-ana' || r.nome?.includes('Ana Silva'));
+
+  const loggedGuardian = storedAna || {
+    id: 'resp-ana',
+    nome: 'Ana Silva Pereira',
+    cpf: '111.222.333-44',
+    telefone: '(11) 98765-4321',
+    email: 'ana.silva@email.com',
+    foto: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=240&auto=format&fit=crop&q=80',
+    parentesco: 'Mãe (Responsável Legal)',
+    biometriaCadastrada: false,
+    faceDescriptor: null
+  };
 
   // Multi-seleção de filhos para o PIN Familiar
   const [selectedStudentIds, setSelectedStudentIds] = useState(
@@ -43,11 +59,79 @@ export default function GuardianView({ onOpenStudentModal }) {
   const [copied, setCopied] = useState(false);
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
   const [isThirdPartyModalOpen, setIsThirdPartyModalOpen] = useState(false);
+  const [editingAuth, setEditingAuth] = useState(null);
   const [isTermViewerOpen, setIsTermViewerOpen] = useState(false);
   const [selectedAuthForTerm, setSelectedAuthForTerm] = useState(null);
   const [exitLogs, setExitLogs] = useState(() => getExitLogs());
   const [activeTab, setActiveTab] = useState('home'); // 'home', 'adults', 'history', 'profile'
   const [currentTimeStr, setCurrentTimeStr] = useState('');
+
+  // Estados da aba Perfil (Edição permitida: Foto, Telefone, E-mail) & Teste Facial
+  const [phoneDraft, setPhoneDraft] = useState(null);
+  const [emailDraft, setEmailDraft] = useState(null);
+  const profilePhone = phoneDraft !== null ? phoneDraft : (loggedGuardian.telefone || '');
+  const profileEmail = emailDraft !== null ? emailDraft : (loggedGuardian.email || '');
+  const setProfilePhone = (val) => setPhoneDraft(val);
+  const setProfileEmail = (val) => setEmailDraft(val);
+  const [profileMsg, setProfileMsg] = useState('');
+  const [cameraMode, setCameraMode] = useState(null); // 'profile_update' | 'face_test' | null
+  const [faceTestTargetId, setFaceTestTargetId] = useState(loggedGuardian.id);
+  const [faceTestResult, setFaceTestResult] = useState(null);
+  const [isProcessingFace, setIsProcessingFace] = useState(false);
+  const [faceErrorMsg, setFaceErrorMsg] = useState('');
+  const [videoDevices, setVideoDevices] = useState([]);
+  const [selectedCameraId, setSelectedCameraId] = useState(() => localStorage.getItem('valida_school_preferred_camera') || '');
+
+  const profileVideoRef = useRef(null);
+  const profileStreamRef = useRef(null);
+  const profileFileInputRef = useRef(null);
+  const testFileInputRef = useRef(null);
+
+  useEffect(() => {
+    getVideoDevices().then(devs => {
+      setVideoDevices(devs);
+      setSelectedCameraId(prev => prev || (devs.length > 0 ? devs[0].deviceId : ''));
+    });
+  }, []);
+
+  function stopProfileCamera() {
+    if (profileStreamRef.current) {
+      stopCameraStream(profileStreamRef.current);
+      profileStreamRef.current = null;
+    }
+  }
+
+  useEffect(() => {
+    if (!cameraMode || activeTab !== 'profile') {
+      stopProfileCamera();
+      return;
+    }
+
+    let active = true;
+    (async () => {
+      try {
+        stopProfileCamera();
+        setFaceErrorMsg('');
+        await new Promise(r => setTimeout(r, 80));
+        if (!active) return;
+        const stream = await startCameraStream(profileVideoRef.current, selectedCameraId);
+        if (active) {
+          profileStreamRef.current = stream;
+        } else {
+          stopCameraStream(stream);
+        }
+      } catch (err) {
+        if (active) {
+          setFaceErrorMsg(err.message || 'Câmera indisponível neste dispositivo. Use o envio de foto.');
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+      stopProfileCamera();
+    };
+  }, [cameraMode, activeTab, selectedCameraId]);
 
   // Sincroniza hora do topo estilo iOS
   useEffect(() => {
@@ -152,8 +236,129 @@ export default function GuardianView({ onOpenStudentModal }) {
     );
     if (!confirmRevoke) return;
 
-    revokeAuthorizationLocal(authId);
+    revokeAuthorizationLocal(authId, false);
     playPinClick();
+  }
+
+  function handleDeleteAdult(authId, adultName) {
+    const confirmDelete = window.confirm(
+      `Deseja APAGAR permanentemente o cadastro de "${adultName}" da sua lista de autorizados?\n\nEsta ação removerá o cadastro e o acesso imediatamente.`
+    );
+    if (!confirmDelete) return;
+
+    revokeAuthorizationLocal(authId, true);
+    playPinClick();
+  }
+
+  function handleSaveSimpleProfile(e) {
+    e.preventDefault();
+    updateGuardianProfileLocal(loggedGuardian.id, {
+      telefone: profilePhone.trim(),
+      email: profileEmail.trim()
+    });
+    setProfileMsg('Dados de contato salvos com sucesso!');
+    playSuccessChime();
+    setTimeout(() => setProfileMsg(''), 3000);
+  }
+
+  async function runBiometricCaptureFromVideoOrImage(imgOrCanvas, previewDataUrl) {
+    setIsProcessingFace(true);
+    setFaceErrorMsg('');
+    try {
+      const detection = await detectFaceAndComputeDescriptor(imgOrCanvas);
+      if (!detection || !detection.descriptor) {
+        setFaceErrorMsg('Nenhum rosto detectado com clareza. Melhore a iluminação e tente novamente.');
+        playErrorBuzzer();
+        return;
+      }
+
+      if (cameraMode === 'profile_update') {
+        updateGuardianProfileLocal(loggedGuardian.id, {
+          foto: previewDataUrl,
+          faceDescriptor: detection.descriptor
+        });
+        setProfileMsg('Foto de perfil e biometria facial atualizadas com sucesso!');
+        setCameraMode(null);
+        stopProfileCamera();
+        playSuccessChime();
+        setTimeout(() => setProfileMsg(''), 4000);
+      } else if (cameraMode === 'face_test') {
+        const targetAdult = familyAdultsList.find(a => a.id === faceTestTargetId) || loggedGuardian;
+        let savedDescriptor = targetAdult.faceDescriptor;
+
+        // Tenta extrair descriptor direto da foto do perfil se ainda não houver vetor salvo
+        if (!savedDescriptor && targetAdult.foto) {
+          const fallbackDet = await extractDescriptorFromImageUrl(targetAdult.foto);
+          if (fallbackDet && fallbackDet.descriptor) {
+            savedDescriptor = fallbackDet.descriptor;
+            if (targetAdult.id === loggedGuardian.id) {
+              updateGuardianProfileLocal(loggedGuardian.id, { faceDescriptor: savedDescriptor });
+            }
+          }
+        }
+
+        if (!savedDescriptor) {
+          setFaceTestResult({
+            approved: false,
+            similarity: 0,
+            distance: 1.0,
+            targetName: targetAdult.nome,
+            noProfileVector: true,
+            previewUrl: previewDataUrl,
+            message: 'A foto atual do perfil não possui vetor facial válido para comparação. Atualize sua foto de perfil primeiro.'
+          });
+          playErrorBuzzer();
+          setCameraMode(null);
+          stopProfileCamera();
+          return;
+        }
+
+        const comparison = compareDescriptors(detection.descriptor, savedDescriptor);
+        const approved = comparison.similarity >= MIN_SIMILARITY_THRESHOLD;
+        setFaceTestResult({
+          approved,
+          similarity: comparison.similarity,
+          distance: comparison.distance,
+          targetName: targetAdult.nome,
+          noProfileVector: false,
+          previewUrl: previewDataUrl,
+          message: approved
+            ? `Reconhecimento APROVADO! Sua foto de perfil está pronta para liberar no Totem (${comparison.similarity}% >= ${MIN_SIMILARITY_THRESHOLD}%).`
+            : `Similaridade baixa (${comparison.similarity}%). Recomendamos atualizar a foto do perfil com melhor iluminação.`
+        });
+        setCameraMode(null);
+        stopProfileCamera();
+        if (approved) playSuccessChime();
+        else playErrorBuzzer();
+      }
+    } catch (err) {
+      setFaceErrorMsg('Erro ao processar rosto: ' + err.message);
+    } finally {
+      setIsProcessingFace(false);
+    }
+  }
+
+  async function handleProfileSnapCamera() {
+    if (!profileVideoRef.current) return;
+    const snapped = captureVideoFrameDataUrl(profileVideoRef.current, true);
+    if (!snapped) return;
+    await runBiometricCaptureFromVideoOrImage(snapped.canvas, snapped.dataUrl);
+  }
+
+  function handleProfileFileUpload(e, mode) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setCameraMode(mode);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target.result;
+      const img = new Image();
+      img.onload = async () => {
+        await runBiometricCaptureFromVideoOrImage(img, dataUrl);
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
   }
 
   const formatMinutes = (secs) => {
@@ -222,17 +427,22 @@ export default function GuardianView({ onOpenStudentModal }) {
               {activeTab === 'home' && 'Liberação de Saída'}
               {activeTab === 'adults' && 'Autorizados & Vans'}
               {activeTab === 'history' && 'Notificações & Histórico'}
-              {activeTab === 'profile' && 'Perfil Familiar'}
+              {activeTab === 'profile' && 'Perfil & Teste Facial'}
             </h2>
           </div>
 
           <button
-            onClick={onOpenStudentModal}
-            title="Cadastrar novo dependente"
+            onClick={() => {
+              setActiveTab('profile');
+              setFaceTestTargetId(loggedGuardian.id);
+              setFaceTestResult(null);
+              setCameraMode('face_test');
+            }}
+            title="Testar reconhecimento facial do meu perfil"
             style={{
-              background: 'rgba(6, 182, 212, 0.15)',
-              border: '1px solid rgba(6, 182, 212, 0.4)',
-              color: 'var(--cyan-accent)',
+              background: 'rgba(16, 185, 129, 0.15)',
+              border: '1px solid rgba(16, 185, 129, 0.4)',
+              color: '#34d399',
               borderRadius: 'var(--radius-full)',
               padding: '6px 10px',
               fontSize: '0.72rem',
@@ -243,8 +453,8 @@ export default function GuardianView({ onOpenStudentModal }) {
               cursor: 'pointer'
             }}
           >
-            <Plus size={13} />
-            <span>Aluno</span>
+            <ScanFace size={14} />
+            <span>Testar Rosto</span>
           </button>
         </div>
 
@@ -514,7 +724,10 @@ export default function GuardianView({ onOpenStudentModal }) {
             {/* Action Buttons */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '8px' }}>
               <button
-                onClick={() => setIsThirdPartyModalOpen(true)}
+                onClick={() => {
+                  setEditingAuth(null);
+                  setIsThirdPartyModalOpen(true);
+                }}
                 className="button-primary"
                 style={{
                   width: '100%',
@@ -628,7 +841,7 @@ export default function GuardianView({ onOpenStudentModal }) {
                         </span>
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                         <button
                           onClick={() => {
                             setSelectedAuthForTerm({
@@ -641,41 +854,102 @@ export default function GuardianView({ onOpenStudentModal }) {
                             background: 'rgba(99, 102, 241, 0.15)',
                             border: '1px solid rgba(99, 102, 241, 0.35)',
                             color: '#a5b4fc',
-                            padding: '3px 8px',
+                            padding: '3px 7px',
                             borderRadius: '4px',
-                            fontSize: '0.68rem',
+                            fontSize: '0.66rem',
                             fontWeight: 700,
                             display: 'flex',
                             alignItems: 'center',
-                            gap: '4px',
+                            gap: '3px',
                             cursor: 'pointer'
                           }}
                         >
-                          <FileText size={12} />
-                          <span>Ver Termo</span>
+                          <FileText size={11} />
+                          <span>Termo</span>
                         </button>
 
-                        {/* Botão de Revogar (apenas para não-legais) */}
-                        {!isLegal && !isRevoked && (
-                          <button
-                            onClick={() => handleRevokeAdult(adult.authId || adult.id, adult.nome)}
-                            style={{
-                              background: 'rgba(239, 68, 68, 0.12)',
-                              border: '1px solid rgba(239, 68, 68, 0.3)',
-                              color: '#f87171',
-                              padding: '3px 8px',
-                              borderRadius: '4px',
-                              fontSize: '0.68rem',
-                              fontWeight: 700,
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            <UserX size={12} />
-                            <span>Revogar</span>
-                          </button>
+                        {isLegal ? (
+                          <span style={{
+                            background: 'rgba(59, 130, 246, 0.15)',
+                            color: '#93c5fd',
+                            padding: '3px 7px',
+                            borderRadius: '4px',
+                            fontSize: '0.64rem',
+                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px'
+                          }}>
+                            <Lock size={10} />
+                            <span>Escola</span>
+                          </span>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => {
+                                setEditingAuth(adult);
+                                setIsThirdPartyModalOpen(true);
+                              }}
+                              style={{
+                                background: 'rgba(6, 182, 212, 0.14)',
+                                border: '1px solid rgba(6, 182, 212, 0.35)',
+                                color: '#67e8f9',
+                                padding: '3px 7px',
+                                borderRadius: '4px',
+                                fontSize: '0.66rem',
+                                fontWeight: 700,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              <Edit3 size={11} />
+                              <span>Editar</span>
+                            </button>
+
+                            {!isRevoked && (
+                              <button
+                                onClick={() => handleRevokeAdult(adult.authId || adult.id, adult.nome)}
+                                style={{
+                                  background: 'rgba(245, 158, 11, 0.14)',
+                                  border: '1px solid rgba(245, 158, 11, 0.35)',
+                                  color: '#fbbf24',
+                                  padding: '3px 7px',
+                                  borderRadius: '4px',
+                                  fontSize: '0.66rem',
+                                  fontWeight: 700,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '3px',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                <UserX size={11} />
+                                <span>Revogar</span>
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => handleDeleteAdult(adult.authId || adult.id, adult.nome)}
+                              style={{
+                                background: 'rgba(239, 68, 68, 0.12)',
+                                border: '1px solid rgba(239, 68, 68, 0.3)',
+                                color: '#f87171',
+                                padding: '3px 7px',
+                                borderRadius: '4px',
+                                fontSize: '0.66rem',
+                                fontWeight: 700,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              <Trash2 size={11} />
+                              <span>Apagar</span>
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
@@ -745,53 +1019,313 @@ export default function GuardianView({ onOpenStudentModal }) {
         )}
 
         {/* ========================================================
-            TAB 4: PERFIL E AJUSTES
+            TAB 4: PERFIL EDITÁVEL (FOTO/CONTATO) & TESTE FACIAL
             ======================================================== */}
         {activeTab === 'profile' && (
-          <div className="card-glass" style={{ display: 'flex', flexDirection: 'column', gap: '14px', fontSize: '0.85rem' }}>
-            <div>
-              <span style={{ color: 'var(--text-dim)', fontSize: '0.72rem', textTransform: 'uppercase', fontWeight: 700 }}>
-                Responsável Legal Contratual:
-              </span>
-              <strong style={{ color: '#fff', display: 'block', fontSize: '1.05rem', marginTop: '2px' }}>
-                {loggedGuardian.nome}
-              </strong>
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-                CPF: {loggedGuardian.cpf} • {loggedGuardian.telefone}
-              </span>
-            </div>
-
-            <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '10px' }}>
-              <span style={{ color: 'var(--text-dim)', fontSize: '0.72rem', textTransform: 'uppercase', fontWeight: 700 }}>
-                Dependentes Vinculados ({childrenList.length}):
-              </span>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
-                {childrenList.map(c => (
-                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.78rem', color: '#fff' }}>
-                    <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981' }} />
-                    <span><strong>{c.nome}</strong> — {c.turma} (Matrícula: {c.matricula})</span>
-                  </div>
-                ))}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '0.84rem' }}>
+            {profileMsg && (
+              <div style={{
+                background: 'rgba(16, 185, 129, 0.15)',
+                border: '1px solid rgba(16, 185, 129, 0.4)',
+                color: '#34d399',
+                padding: '8px 12px',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '0.78rem',
+                fontWeight: 700
+              }}>
+                ✓ {profileMsg}
               </div>
+            )}
+
+            {faceErrorMsg && (
+              <div style={{
+                background: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid rgba(239, 68, 68, 0.4)',
+                color: '#fca5a5',
+                padding: '8px 12px',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '0.78rem'
+              }}>
+                {faceErrorMsg}
+              </div>
+            )}
+
+            {/* Hidden File Inputs */}
+            <input
+              type="file"
+              ref={profileFileInputRef}
+              accept="image/*"
+              capture="user"
+              style={{ display: 'none' }}
+              onChange={e => handleProfileFileUpload(e, 'profile_update')}
+            />
+            <input
+              type="file"
+              ref={testFileInputRef}
+              accept="image/*"
+              capture="user"
+              style={{ display: 'none' }}
+              onChange={e => handleProfileFileUpload(e, 'face_test')}
+            />
+
+            {/* Card 1: Foto Biométrica & Edição Simples */}
+            <div className="card-glass" style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <img
+                  src={loggedGuardian.foto || 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=240&auto=format&fit=crop&q=80'}
+                  alt={loggedGuardian.nome}
+                  style={{
+                    width: '56px',
+                    height: '56px',
+                    borderRadius: '50%',
+                    objectFit: 'cover',
+                    border: loggedGuardian.faceDescriptor ? '2px solid #10b981' : '2px solid #f59e0b'
+                  }}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <strong style={{ color: '#fff', display: 'block', fontSize: '0.96rem' }}>
+                    {loggedGuardian.nome}
+                  </strong>
+                  <span style={{
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                    color: loggedGuardian.faceDescriptor ? '#10b981' : '#fbbf24'
+                  }}>
+                    {loggedGuardian.faceDescriptor
+                      ? '✓ Biometria Facial Ativa (128 pontos)'
+                      : '⚠️ Sem vetor facial salvo — atualize sua selfie'}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => {
+                    setFaceTestResult(null);
+                    setCameraMode(cameraMode === 'profile_update' ? null : 'profile_update');
+                  }}
+                  style={{ padding: '7px 10px', fontSize: '0.74rem' }}
+                >
+                  <Camera size={14} />
+                  <span>{cameraMode === 'profile_update' ? 'Fechar Câmera' : 'Alterar Foto (Câmera)'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => profileFileInputRef.current && profileFileInputRef.current.click()}
+                  style={{ padding: '7px 10px', fontSize: '0.74rem' }}
+                >
+                  <Upload size={14} />
+                  <span>Enviar Selfie / Arquivo</span>
+                </button>
+              </div>
+
+              {/* Form editável simples: Telefone e E-mail */}
+              <form onSubmit={handleSaveSimpleProfile} style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                <div>
+                  <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '3px' }}>
+                    WhatsApp / Telefone (Editável):
+                  </label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    value={profilePhone}
+                    onChange={e => setProfilePhone(e.target.value)}
+                    style={{ padding: '7px 10px', fontSize: '0.82rem' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '3px' }}>
+                    E-mail de Notificações (Editável):
+                  </label>
+                  <input
+                    type="email"
+                    className="input-field"
+                    placeholder="seu.email@exemplo.com"
+                    value={profileEmail}
+                    onChange={e => setProfileEmail(e.target.value)}
+                    style={{ padding: '7px 10px', fontSize: '0.82rem' }}
+                  />
+                </div>
+                <button type="submit" className="button-primary" style={{ padding: '8px', fontSize: '0.8rem' }}>
+                  Salvar Dados Simples do Perfil
+                </button>
+              </form>
             </div>
 
-            <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '10px' }}>
-              <span style={{ color: 'var(--text-dim)', fontSize: '0.72rem', textTransform: 'uppercase', fontWeight: 700 }}>
-                Escola Matriculada:
-              </span>
-              <strong style={{ color: '#fff', display: 'block', fontSize: '0.85rem' }}>
-                Colégio Valida School - Unidade Central
-              </strong>
-            </div>
-
-            <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '10px' }}>
-              <span style={{ color: '#818cf8', fontSize: '0.72rem', textTransform: 'uppercase', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <Shield size={13} />
-                Segurança LGPD (Art. 14):
-              </span>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.74rem', marginTop: '4px', lineHeight: 1.4 }}>
-                Seus dados biométricos e dos seus dependentes são tratados estritamente no melhor interesse das crianças, com prova de vida anti-fraude e logs auditáveis com carimbo de tempo.
+            {/* Card 2: Teste de Reconhecimento Facial (Self-Check) */}
+            <div className="card-glass" style={{ padding: '14px', border: '1px solid rgba(16, 185, 129, 0.35)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                <ScanFace size={18} color="#10b981" />
+                <strong style={{ color: '#fff', fontSize: '0.9rem' }}>
+                  Teste de Reconhecimento Facial
+                </strong>
+              </div>
+              <p style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: '10px', lineHeight: 1.4 }}>
+                Valide agora se a foto salva no perfil está reconhecendo corretamente antes de ir até o Totem da escola.
               </p>
+
+              <div style={{ marginBottom: '8px' }}>
+                <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '3px' }}>
+                  Quem deseja testar?
+                </label>
+                <select
+                  className="input-field"
+                  value={faceTestTargetId}
+                  onChange={e => {
+                    setFaceTestTargetId(e.target.value);
+                    setFaceTestResult(null);
+                  }}
+                  style={{ padding: '6px 10px', fontSize: '0.78rem' }}
+                >
+                  <option value={loggedGuardian.id}>Meu Perfil: {loggedGuardian.nome}</option>
+                  {familyAdultsList
+                    .filter(a => a.id !== loggedGuardian.id)
+                    .map(a => (
+                      <option key={a.id} value={a.id}>
+                        Autorizado: {a.nome} ({a.parentesco})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="button-primary"
+                  onClick={() => {
+                    setFaceTestResult(null);
+                    setCameraMode(cameraMode === 'face_test' ? null : 'face_test');
+                  }}
+                  style={{
+                    padding: '8px',
+                    fontSize: '0.76rem',
+                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+                  }}
+                >
+                  <Camera size={14} />
+                  <span>{cameraMode === 'face_test' ? 'Fechar Teste' : 'Testar Câmera'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => testFileInputRef.current && testFileInputRef.current.click()}
+                  style={{ padding: '8px', fontSize: '0.76rem' }}
+                >
+                  <Upload size={14} />
+                  <span>Testar Foto</span>
+                </button>
+              </div>
+
+              {/* Câmera Ativa (para Atualizar Foto ou Testar Rosto) */}
+              {cameraMode && (
+                <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#818cf8', marginBottom: '6px' }}>
+                    {cameraMode === 'profile_update' ? '📸 Capturar Nova Foto do Perfil' : '🔍 Aponte o rosto para testar reconhecimento'}
+                  </div>
+                  {videoDevices.length > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                      <Video size={13} color="#818cf8" />
+                      <select
+                        className="input-field"
+                        value={selectedCameraId}
+                        onChange={e => {
+                          setSelectedCameraId(e.target.value);
+                          localStorage.setItem('valida_school_preferred_camera', e.target.value);
+                        }}
+                        style={{ padding: '5px 8px', fontSize: '0.74rem' }}
+                      >
+                        {videoDevices.map(d => (
+                          <option key={d.deviceId} value={d.deviceId}>
+                            {d.label || `Câmera ${d.deviceId.slice(0, 6)}`}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div style={{ position: 'relative', height: '200px', background: '#000', borderRadius: '10px', overflow: 'hidden', marginBottom: '8px' }}>
+                    <video
+                      ref={profileVideoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="button-primary"
+                    onClick={handleProfileSnapCamera}
+                    disabled={isProcessingFace}
+                    style={{ width: '100%', padding: '9px', fontSize: '0.8rem' }}
+                  >
+                    <Camera size={15} />
+                    <span>
+                      {isProcessingFace
+                        ? 'Processando Biometria...'
+                        : (cameraMode === 'profile_update' ? 'Salvar Nova Foto de Perfil' : 'Verificar Compatibilidade Facial')}
+                    </span>
+                  </button>
+                </div>
+              )}
+
+              {/* Resultado do Teste Facial */}
+              {faceTestResult && (
+                <div style={{
+                  marginTop: '12px',
+                  padding: '10px',
+                  borderRadius: 'var(--radius-sm)',
+                  background: faceTestResult.approved ? 'rgba(16, 185, 129, 0.14)' : 'rgba(239, 68, 68, 0.14)',
+                  border: `1px solid ${faceTestResult.approved ? 'rgba(16, 185, 129, 0.45)' : 'rgba(239, 68, 68, 0.45)'}`
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                    {faceTestResult.approved ? <CheckCircle2 size={18} color="#10b981" /> : <AlertCircle size={18} color="#f87171" />}
+                    <strong style={{ color: '#fff', fontSize: '0.82rem' }}>
+                      {faceTestResult.approved ? `Aprovado (${faceTestResult.similarity}% similaridade)` : 'Atenção: Teste Reprovado'}
+                    </strong>
+                  </div>
+                  <p style={{ fontSize: '0.73rem', color: '#e2e8f0', margin: 0, lineHeight: 1.4 }}>
+                    {faceTestResult.message}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Card 3: Dados Protegidos Gerenciados Exclusivamente pela Escola */}
+            <div className="card-glass" style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px', opacity: 0.92 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ color: '#fbbf24', fontSize: '0.72rem', textTransform: 'uppercase', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <Lock size={13} />
+                  <span>Dados Bloqueados (Exclusivo Escola)</span>
+                </span>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.7rem', color: 'var(--text-dim)', display: 'block' }}>Nome Completo & CPF (Somente Leitura)</label>
+                <div style={{ background: 'rgba(0,0,0,0.28)', padding: '7px 10px', borderRadius: '6px', color: '#cbd5e1', fontSize: '0.78rem', marginTop: '3px' }}>
+                  {loggedGuardian.nome} • CPF: {loggedGuardian.cpf}
+                </div>
+              </div>
+
+              <div>
+                <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem', display: 'block', marginBottom: '4px' }}>
+                  Crianças Matriculadas ({childrenList.length} — não editável pelo app):
+                </span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  {childrenList.map(c => (
+                    <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: '#cbd5e1', background: 'rgba(0,0,0,0.25)', padding: '6px 8px', borderRadius: '6px' }}>
+                      <Lock size={12} color="#64748b" />
+                      <span><strong>{c.nome}</strong> — {c.turma} (Matrícula: {c.matricula})</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '8px', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                <strong style={{ color: '#818cf8' }}>Instituição:</strong> Colégio Valida School — Para alterar CPF, matrícula ou dependentes, procure a secretaria.
+              </div>
             </div>
           </div>
         )}
@@ -845,14 +1379,19 @@ export default function GuardianView({ onOpenStudentModal }) {
         }}
       />
 
-      {/* Modal to Authorize Third-Party or Van Driver with Legal Term */}
+      {/* Modal to Authorize or Edit Third-Party or Van Driver with Legal Term */}
       <ThirdPartyModal
         isOpen={isThirdPartyModalOpen}
-        onClose={() => setIsThirdPartyModalOpen(false)}
+        onClose={() => {
+          setIsThirdPartyModalOpen(false);
+          setEditingAuth(null);
+        }}
         currentGuardian={loggedGuardian}
         childrenList={childrenList}
+        editingAuth={editingAuth}
         onAuthorized={() => {
           setStudents(getStudents());
+          setEditingAuth(null);
         }}
       />
 

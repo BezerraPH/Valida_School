@@ -119,6 +119,46 @@ export async function createStudentApi(studentData) {
   return null;
 }
 
+export async function updateStudentApi(studentId, updates) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/alunos/${encodeURIComponent(studentId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    });
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.warn('Erro ao atualizar aluno no servidor:', err);
+  }
+  return null;
+}
+
+export async function deleteStudentApi(studentId) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/alunos/${encodeURIComponent(studentId)}`, {
+      method: 'DELETE'
+    });
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.warn('Erro ao excluir aluno no servidor:', err);
+  }
+  return null;
+}
+
+export async function updateGuardianProfileApi(adultId, updates) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/responsaveis/${encodeURIComponent(adultId)}/perfil`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    });
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.warn('Erro ao atualizar perfil no servidor:', err);
+  }
+  return null;
+}
+
 export async function updateBiometricsApi(studentId, adultId, photo, faceDescriptor) {
   try {
     const res = await fetch(`${API_BASE_URL}/api/responsaveis/biometria`, {
@@ -133,12 +173,12 @@ export async function updateBiometricsApi(studentId, adultId, photo, faceDescrip
   return null;
 }
 
-export async function generatePinApi(studentId, criadoPor = 'App Responsável') {
+export async function generatePinApi(studentId, criadoPor = 'App Responsável', code = null) {
   try {
     const res = await fetch(`${API_BASE_URL}/api/pins/gerar`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ studentId, criadoPor })
+      body: JSON.stringify({ studentId, criadoPor, code })
     });
     if (res.ok) return await res.json();
   } catch (err) {
@@ -172,12 +212,12 @@ export async function validatePinApi(code, studentIdOrMatricula = null) {
   return null;
 }
 
-export async function generateFamilyPinApi(studentIds, criadoPor = 'App Responsável') {
+export async function generateFamilyPinApi(studentIds, criadoPor = 'App Responsável', code = null) {
   try {
     const res = await fetch(`${API_BASE_URL}/api/pins/gerar-familiar`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ studentIds, criadoPor })
+      body: JSON.stringify({ studentIds, criadoPor, code })
     });
     if (res.ok) return await res.json();
   } catch (err) {
@@ -210,14 +250,28 @@ export async function addThirdPartyAuthorizationApi(data) {
   return null;
 }
 
-export async function revokeAuthorizationApi(authId) {
+export async function updateAuthorizationApi(authId, data) {
   try {
-    const res = await fetch(`${API_BASE_URL}/api/autorizacoes/${authId}`, {
+    const res = await fetch(`${API_BASE_URL}/api/autorizacoes/${encodeURIComponent(authId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.warn('Erro ao editar autorização:', err);
+  }
+  return null;
+}
+
+export async function revokeAuthorizationApi(authId, permanent = false) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/autorizacoes/${encodeURIComponent(authId)}?permanent=${permanent ? 'true' : 'false'}`, {
       method: 'DELETE'
     });
     if (res.ok) return await res.json();
   } catch (err) {
-    console.warn('Erro ao revogar autorização:', err);
+    console.warn('Erro ao revogar/excluir autorização:', err);
   }
   return null;
 }
@@ -271,4 +325,40 @@ export async function fetchLogsFromApi() {
   } catch {}
   const cached = localStorage.getItem('valida_school_logs');
   return cached ? JSON.parse(cached) : [];
+}
+
+export async function fetchDailySecretCodeApi() {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/admin/codigo-diario`);
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.warn('Erro ao consultar código secreto diário:', err);
+  }
+  return null;
+}
+
+export async function rotateDailySecretCodeApi() {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/admin/codigo-diario/rotacionar`, {
+      method: 'POST'
+    });
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.warn('Erro ao rotacionar código secreto diário:', err);
+  }
+  return null;
+}
+
+export async function validateDailySecretCodeApi(code, studentId, funcionarioNome = '', motivo = '') {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/admin/validar-codigo-diario`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, studentId, funcionarioNome, motivo })
+    });
+    return await res.json();
+  } catch (err) {
+    console.warn('Erro ao validar código secreto diário:', err);
+    return { valid: false, reason: 'Servidor indisponível para validar código diário.' };
+  }
 }

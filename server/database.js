@@ -1,6 +1,7 @@
 // SQLite Database Engine using Node.js 22 native DatabaseSync
 // Modelagem N:N (Muitos para Muitos), PIN Familiar Multialuno e Modo Van Escolar
 import { DatabaseSync } from 'node:sqlite';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -136,6 +137,16 @@ export function initDatabase() {
     );
   `);
 
+  // 8. Tabela Código Secreto Diário (Liberação Administrativa sem PIN/Biometria)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS codigos_diarios (
+      data_dia TEXT PRIMARY KEY,
+      codigo TEXT NOT NULL,
+      rotacoes INTEGER DEFAULT 0,
+      criado_em TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
   seedData();
 }
 
@@ -214,32 +225,41 @@ export const studentQueries = {
   getAll() {
     const students = db.prepare('SELECT * FROM alunos ORDER BY nome ASC').all();
     return students.map(s => {
+      const now = Date.now();
       const auths = db.prepare(`
-        SELECT a.id as auth_id, a.tipo, a.parentesco_vinculo, a.validade_tipo, a.validade_ate, a.status, a.criado_por_nome,
-               r.id as adult_id, r.nome, r.cpf, r.telefone, r.foto, r.biometria_cadastrada, r.face_descriptor,
+        SELECT a.id as auth_id, a.tipo, a.parentesco_vinculo, a.validade_tipo, a.validade_ate, a.status, a.criado_por_nome, a.criado_em, a.termo_texto,
+               r.id as adult_id, r.nome, r.cpf, r.telefone, r.email, r.foto, r.biometria_cadastrada, r.face_descriptor,
                r.is_transportador, r.van_empresa, r.van_placa, r.van_rota
         FROM autorizacoes_retirada a
         JOIN responsaveis r ON a.responsavel_id = r.id
         WHERE a.aluno_id = ? AND a.status = 'ATIVO'
       `).all(s.id);
 
-      const responsaveis = auths.map(a => ({
-        id: a.adult_id,
-        authId: a.auth_id,
-        nome: a.nome,
-        cpf: a.cpf,
-        telefone: a.telefone,
-        foto: a.foto,
-        parentesco: a.parentesco_vinculo,
-        tipo: a.tipo,
-        validadeTipo: a.validade_tipo,
-        validadeAte: a.validade_ate,
-        isTransportador: Boolean(a.is_transportador),
-        vanEmpresa: a.van_empresa,
-        vanPlaca: a.van_placa,
-        biometriaCadastrada: Boolean(a.biometria_cadastrada),
-        faceDescriptor: a.face_descriptor ? JSON.parse(a.face_descriptor) : null
-      }));
+      const responsaveis = auths.map(a => {
+        const isExpired = Boolean(a.validade_ate && a.validade_ate < now);
+        return {
+          id: a.adult_id,
+          authId: a.auth_id,
+          nome: a.nome,
+          cpf: a.cpf,
+          telefone: a.telefone,
+          email: a.email,
+          foto: a.foto,
+          parentesco: a.parentesco_vinculo,
+          tipo: a.tipo,
+          status: isExpired ? 'EXPIRADO' : a.status,
+          validadeTipo: a.validade_tipo,
+          validadeAte: a.validade_ate,
+          criadoPorNome: a.criado_por_nome,
+          createdAt: a.criado_em,
+          termoTexto: a.termo_texto,
+          isTransportador: Boolean(a.is_transportador),
+          vanEmpresa: a.van_empresa,
+          vanPlaca: a.van_placa,
+          biometriaCadastrada: Boolean(a.biometria_cadastrada),
+          faceDescriptor: a.face_descriptor ? JSON.parse(a.face_descriptor) : null
+        };
+      });
 
       return {
         ...s,
@@ -288,19 +308,43 @@ export const studentQueries = {
       existing = db.prepare("SELECT id FROM responsaveis WHERE replace(replace(cpf, '.', ''), '-', '') = ?").get(cleanCpf);
     }
 
+    const hasDescriptor = Array.isArray(adulto.faceDescriptor) && adulto.faceDescriptor.length > 0;
+
     if (existing) {
       adultId = existing.id;
+      if (hasDescriptor || adulto.foto) {
+        db.prepare(`
+          UPDATE responsaveis
+          SET nome = ?, telefone = ?,
+              foto = COALESCE(?, foto),
+              face_descriptor = COALESCE(?, face_descriptor),
+              biometria_cadastrada = CASE WHEN ? = 1 THEN 1 ELSE biometria_cadastrada END
+          WHERE id = ?
+        `).run(
+          adulto.nome,
+          adulto.telefone,
+          adulto.foto || null,
+          hasDescriptor ? JSON.stringify(adulto.faceDescriptor) : null,
+          hasDescriptor ? 1 : 0,
+          adultId
+        );
+      }
     } else {
       adultId = adultId || `resp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       db.prepare(`
-        INSERT INTO responsaveis (id, nome, cpf, telefone, foto, is_transportador, van_empresa, van_placa)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO responsaveis (
+          id, nome, cpf, telefone, foto, biometria_cadastrada, face_descriptor,
+          is_transportador, van_empresa, van_placa
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         adultId,
         adulto.nome,
         adulto.cpf || null,
         adulto.telefone,
         adulto.foto || null,
+        hasDescriptor ? 1 : 0,
+        hasDescriptor ? JSON.stringify(adulto.faceDescriptor) : null,
         adulto.isTransportador ? 1 : 0,
         adulto.vanEmpresa || null,
         adulto.vanPlaca || null
@@ -335,9 +379,202 @@ export const studentQueries = {
     return { adultId, createdAuthIds };
   },
 
-  revokeAuthorization(authId) {
-    db.prepare("UPDATE autorizacoes_retirada SET status = 'REVOGADO' WHERE id = ?").run(authId);
+  createStudent(studentData) {
+    const stuId = studentData.id || `stu-${Date.now()}`;
+    const existing = db.prepare('SELECT id FROM alunos WHERE id = ? OR matricula = ?').get(stuId, studentData.matricula);
+    if (existing) {
+      throw new Error('Já existe um aluno cadastrado com esta matrícula ou ID.');
+    }
+
+    db.prepare(`
+      INSERT INTO alunos (id, instituicao_id, matricula, cpf, nome, turma, sala, turno, foto)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      stuId,
+      studentData.instituicaoId || 'inst-1',
+      studentData.matricula,
+      studentData.cpf || null,
+      studentData.nome,
+      studentData.turma || '1º Ano - Fundamental I',
+      studentData.sala || 'Sala 01',
+      studentData.turno || 'Tarde',
+      studentData.foto || null
+    );
+
+    if (Array.isArray(studentData.responsaveis)) {
+      const insAuth = db.prepare(`
+        INSERT INTO autorizacoes_retirada (
+          id, aluno_id, responsavel_id, tipo, parentesco_vinculo, validade_tipo,
+          termo_assinado, status, criado_por_nome
+        ) VALUES (?, ?, ?, ?, ?, ?, 1, 'ATIVO', 'Secretaria Escolar')
+      `);
+
+      for (const resp of studentData.responsaveis) {
+        const cleanCpf = (resp.cpf || '').replace(/\D/g, '');
+        let adultId = resp.id || `resp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        let existingAdult = null;
+        if (cleanCpf) {
+          existingAdult = db.prepare("SELECT id FROM responsaveis WHERE replace(replace(cpf, '.', ''), '-', '') = ?").get(cleanCpf);
+        }
+
+        if (existingAdult) {
+          adultId = existingAdult.id;
+        } else {
+          db.prepare(`
+            INSERT INTO responsaveis (
+              id, nome, cpf, telefone, email, foto, biometria_cadastrada, face_descriptor,
+              is_transportador, van_empresa, van_placa
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            adultId,
+            resp.nome,
+            resp.cpf && resp.cpf !== 'Não informado' ? resp.cpf : null,
+            resp.telefone || '(11) 99999-9999',
+            resp.email || null,
+            resp.foto || null,
+            resp.biometriaCadastrada ? 1 : 0,
+            resp.faceDescriptor ? JSON.stringify(resp.faceDescriptor) : null,
+            resp.isTransportador ? 1 : 0,
+            resp.vanEmpresa || null,
+            resp.vanPlaca || null
+          );
+        }
+
+        const authId = resp.authId || `auth-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        insAuth.run(
+          authId,
+          stuId,
+          adultId,
+          resp.tipo || 'LEGAL',
+          resp.parentesco || 'Responsável Legal',
+          resp.validadeTipo || 'PERMANENTE'
+        );
+      }
+    }
+
+    return this.getAll().find(s => s.id === stuId);
+  },
+
+  updateStudent(studentId, updates) {
+    const existing = db.prepare('SELECT * FROM alunos WHERE id = ?').get(studentId);
+    if (!existing) throw new Error('Aluno não encontrado.');
+
+    db.prepare(`
+      UPDATE alunos
+      SET nome = ?, matricula = ?, cpf = ?, turma = ?, sala = ?, turno = ?, foto = ?, bloqueio_judicial = ?
+      WHERE id = ?
+    `).run(
+      updates.nome ?? existing.nome,
+      updates.matricula ?? existing.matricula,
+      updates.cpf !== undefined ? updates.cpf : existing.cpf,
+      updates.turma ?? existing.turma,
+      updates.sala ?? existing.sala,
+      updates.turno ?? existing.turno,
+      updates.foto !== undefined ? updates.foto : existing.foto,
+      updates.bloqueioJudicial !== undefined ? (updates.bloqueioJudicial ? 1 : 0) : existing.bloqueio_judicial,
+      studentId
+    );
+
+    return this.getAll().find(s => s.id === studentId);
+  },
+
+  deleteStudent(studentId) {
+    db.prepare('DELETE FROM alunos WHERE id = ?').run(studentId);
+    return { success: true, studentId };
+  },
+
+  updateGuardianProfile(adultId, updates) {
+    const existing = db.prepare('SELECT * FROM responsaveis WHERE id = ?').get(adultId);
+    if (!existing) throw new Error('Responsável não encontrado.');
+
+    // Governança estrita: responsável NÃO altera CPF, nome civil ou vínculos escolares aqui
+    const hasDescriptor = Array.isArray(updates.faceDescriptor) && updates.faceDescriptor.length > 0;
+    db.prepare(`
+      UPDATE responsaveis
+      SET telefone = ?,
+          email = ?,
+          foto = ?,
+          face_descriptor = ?,
+          biometria_cadastrada = ?
+      WHERE id = ?
+    `).run(
+      updates.telefone !== undefined ? updates.telefone : existing.telefone,
+      updates.email !== undefined ? updates.email : existing.email,
+      updates.foto !== undefined ? updates.foto : existing.foto,
+      hasDescriptor ? JSON.stringify(updates.faceDescriptor) : existing.face_descriptor,
+      hasDescriptor ? 1 : existing.biometria_cadastrada,
+      adultId
+    );
+
+    return db.prepare('SELECT * FROM responsaveis WHERE id = ?').get(adultId);
+  },
+
+  updateThirdPartyAuthorization(authId, updates) {
+    const auth = db.prepare('SELECT * FROM autorizacoes_retirada WHERE id = ?').get(authId);
+    if (!auth) throw new Error('Autorização não encontrada.');
+    if (auth.tipo === 'LEGAL') {
+      throw new Error('Responsáveis legais cadastrados pela escola não podem ser alterados pelo aplicativo dos pais.');
+    }
+
+    const adult = db.prepare('SELECT * FROM responsaveis WHERE id = ?').get(auth.responsavel_id);
+    if (adult) {
+      const hasDescriptor = Array.isArray(updates.faceDescriptor) && updates.faceDescriptor.length > 0;
+      db.prepare(`
+        UPDATE responsaveis
+        SET nome = ?, cpf = ?, telefone = ?, foto = ?,
+            face_descriptor = ?, biometria_cadastrada = ?,
+            is_transportador = ?, van_empresa = ?, van_placa = ?
+        WHERE id = ?
+      `).run(
+        updates.nome ?? adult.nome,
+        updates.cpf !== undefined ? (updates.cpf || null) : adult.cpf,
+        updates.telefone ?? adult.telefone,
+        updates.foto !== undefined ? updates.foto : adult.foto,
+        hasDescriptor ? JSON.stringify(updates.faceDescriptor) : adult.face_descriptor,
+        hasDescriptor ? 1 : adult.biometria_cadastrada,
+        updates.isTransportador !== undefined ? (updates.isTransportador ? 1 : 0) : adult.is_transportador,
+        updates.vanEmpresa !== undefined ? updates.vanEmpresa : adult.van_empresa,
+        updates.vanPlaca !== undefined ? updates.vanPlaca : adult.van_placa,
+        adult.id
+      );
+    }
+
+    db.prepare(`
+      UPDATE autorizacoes_retirada
+      SET tipo = ?, parentesco_vinculo = ?, validade_tipo = ?, validade_ate = ?, termo_texto = ?
+      WHERE id = ?
+    `).run(
+      updates.isTransportador ? 'VAN' : 'TERCEIRO',
+      updates.parentesco ?? auth.parentesco_vinculo,
+      updates.validadeTipo ?? auth.validade_tipo,
+      updates.validadeAte !== undefined ? updates.validadeAte : auth.validade_ate,
+      updates.termoTexto ?? auth.termo_texto,
+      authId
+    );
+
     return { success: true, authId };
+  },
+
+  revokeAuthorization(authId, permanent = false) {
+    const auth = db.prepare('SELECT * FROM autorizacoes_retirada WHERE id = ?').get(authId);
+    if (auth && auth.tipo === 'LEGAL') {
+      throw new Error('Responsável legal da matrícula não pode ser excluído pelo aplicativo.');
+    }
+
+    if (permanent) {
+      db.prepare('DELETE FROM autorizacoes_retirada WHERE id = ?').run(authId);
+      // Limpa responsável órfão não-legal se não tiver mais autorizações
+      if (auth) {
+        const remaining = db.prepare('SELECT COUNT(*) as total FROM autorizacoes_retirada WHERE responsavel_id = ?').get(auth.responsavel_id);
+        if (remaining.total === 0) {
+          db.prepare('DELETE FROM responsaveis WHERE id = ?').run(auth.responsavel_id);
+        }
+      }
+      return { success: true, authId, deleted: true };
+    }
+
+    db.prepare("UPDATE autorizacoes_retirada SET status = 'REVOGADO' WHERE id = ?").run(authId);
+    return { success: true, authId, revoked: true };
   },
 
   updateAdultBiometrics(studentId, adultId, photo, faceDescriptor) {
@@ -353,7 +590,7 @@ export const studentQueries = {
 
 // PIN Familiar e Gerenciamento de Tokens
 export const pinQueries = {
-  createFamilyPin(alunosIds, criadoPor = 'App Responsável') {
+  createFamilyPin(alunosIds, criadoPor = 'App Responsável', customCode = null) {
     // Invalida PINs ativos anteriores desses alunos
     for (const stuId of alunosIds) {
       db.prepare(`
@@ -364,7 +601,9 @@ export const pinQueries = {
     }
 
     const id = `pin-${Date.now()}`;
-    const codigo = Math.floor(100000 + Math.random() * 900000).toString();
+    const codigo = (customCode && /^\d{6}$/.test(String(customCode)))
+      ? String(customCode)
+      : Math.floor(100000 + Math.random() * 900000).toString();
     const now = Date.now();
     const expiraEm = now + (15 * 60 * 1000); // 15 minutos
 
@@ -489,8 +728,11 @@ export const vanQueries = {
       driver: {
         id: driver.id,
         nome: driver.nome,
+        cpf: driver.cpf,
         empresa: driver.van_empresa,
+        vanEmpresa: driver.van_empresa,
         placa: driver.van_placa,
+        vanPlaca: driver.van_placa,
         rota: driver.van_rota,
         foto: driver.foto,
         biometriaCadastrada: Boolean(driver.biometria_cadastrada),
@@ -583,5 +825,61 @@ export const logQueries = {
     );
 
     return { id, timestamp, ...log };
+  }
+};
+
+function getTodayDateBr() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date());
+}
+
+// Código Secreto Diário de Liberação Administrativa (muda diariamente à 00h BRT)
+export const dailyCodeQueries = {
+  getOrCreateToday() {
+    const today = getTodayDateBr();
+    let row = db.prepare('SELECT * FROM codigos_diarios WHERE data_dia = ?').get(today);
+
+    if (!row) {
+      const codigo = String(crypto.randomInt(10000000, 99999999));
+      db.prepare(`
+        INSERT INTO codigos_diarios (data_dia, codigo, rotacoes)
+        VALUES (?, ?, 0)
+      `).run(today, codigo);
+      row = db.prepare('SELECT * FROM codigos_diarios WHERE data_dia = ?').get(today);
+    }
+
+    return {
+      dataDia: row.data_dia,
+      codigo: row.codigo,
+      rotacoes: row.rotacoes || 0,
+      expiraEm: `${row.data_dia} 23:59:59 (Horário de Brasília)`
+    };
+  },
+
+  rotateToday() {
+    const today = getTodayDateBr();
+    const current = this.getOrCreateToday();
+    const novoCodigo = String(crypto.randomInt(10000000, 99999999));
+
+    db.prepare(`
+      UPDATE codigos_diarios
+      SET codigo = ?, rotacoes = ?, criado_em = CURRENT_TIMESTAMP
+      WHERE data_dia = ?
+    `).run(novoCodigo, (current.rotacoes || 0) + 1, today);
+
+    return this.getOrCreateToday();
+  },
+
+  validateCode(enteredCode) {
+    const current = this.getOrCreateToday();
+    const clean = String(enteredCode || '').replace(/\D/g, '').trim();
+    return {
+      valid: Boolean(clean && clean === current.codigo),
+      dataDia: current.dataDia
+    };
   }
 };

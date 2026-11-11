@@ -92,6 +92,9 @@ export async function getVideoDevices() {
  */
 export async function startCameraStream(videoElement, preferredDeviceId = null) {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    if (typeof window !== 'undefined' && !window.isSecureContext) {
+      throw new Error('Câmera bloqueada pelo navegador em conexão HTTP não-segura. Acesse via HTTPS ou use a opção Enviar Foto.');
+    }
     throw new Error('Câmera não suportada neste navegador.');
   }
 
@@ -346,6 +349,38 @@ export function findBestAuthorizedMatchFromMultiple(liveDetections, authorizedAd
   }
 
   return best;
+}
+
+export function captureVideoFrameDataUrl(videoElement, mirror = true) {
+  if (!videoElement) return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = videoElement.videoWidth || 640;
+  canvas.height = videoElement.videoHeight || 480;
+  const ctx = canvas.getContext('2d');
+  if (mirror) {
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+  }
+  ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+  return { canvas, dataUrl: canvas.toDataURL('image/jpeg', 0.85) };
+}
+
+export async function extractDescriptorFromImageUrl(imageUrl) {
+  if (!imageUrl) return null;
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = async () => {
+      try {
+        const detection = await detectFaceAndComputeDescriptor(img);
+        resolve(detection);
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = imageUrl;
+  });
 }
 
 /**

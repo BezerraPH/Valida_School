@@ -7,7 +7,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { initDatabase, studentQueries, pinQueries, logQueries, vanQueries } from './database.js';
+import { initDatabase, studentQueries, pinQueries, logQueries, vanQueries, dailyCodeQueries } from './database.js';
 import { WhatsappService } from './whatsappService.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -94,6 +94,45 @@ app.get('/api/alunos/buscar', (req, res) => {
   }
 });
 
+// 2b. Cadastrar Novo Aluno e Responsável Inicial (Exclusivo Escola)
+app.post('/api/alunos', (req, res) => {
+  try {
+    const studentData = req.body;
+    if (!studentData || !studentData.nome || !studentData.matricula) {
+      return res.status(400).json({ error: 'Nome e matrícula do aluno são obrigatórios' });
+    }
+    const created = studentQueries.createStudent(studentData);
+    broadcastEvent('NOVO_ALUNO', created);
+    res.status(201).json(created);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao cadastrar aluno', details: err.message });
+  }
+});
+
+// 2c. Editar Dados do Aluno (Exclusivo Escola)
+app.put('/api/alunos/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const updated = studentQueries.updateStudent(id, req.body);
+    broadcastEvent('ALUNO_ATUALIZADO', updated);
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao atualizar aluno', details: err.message });
+  }
+});
+
+// 2d. Excluir Aluno (Exclusivo Escola)
+app.delete('/api/alunos/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = studentQueries.deleteStudent(id);
+    broadcastEvent('ALUNO_REMOVIDO', { id });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao excluir aluno', details: err.message });
+  }
+});
+
 // 3. Obter todos os filhos de um responsável legal (Ponto 3: 1 pai -> N filhos)
 app.get('/api/responsaveis/:guardianId/filhos', (req, res) => {
   try {
@@ -102,6 +141,33 @@ app.get('/api/responsaveis/:guardianId/filhos', (req, res) => {
     res.json(children);
   } catch (err) {
     res.status(500).json({ error: 'Erro ao buscar filhos do responsável', details: err.message });
+  }
+});
+
+// 3b. Atualizar Biometria Facial de um Responsável / Autorizado
+app.post('/api/responsaveis/biometria', (req, res) => {
+  try {
+    const { studentId, adultId, photo, faceDescriptor } = req.body;
+    if (!adultId || !faceDescriptor) {
+      return res.status(400).json({ error: 'adultId e faceDescriptor são obrigatórios' });
+    }
+    const updated = studentQueries.updateAdultBiometrics(studentId, adultId, photo, faceDescriptor);
+    broadcastEvent('BIOMETRIA_ATUALIZADA', { studentId, adultId });
+    res.json({ success: true, adult: updated });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao atualizar biometria', details: err.message });
+  }
+});
+
+// 3c. Editar Perfil Simples do Responsável (Foto, Telefone, E-mail - bloqueia CPF/Matrícula/Filhos)
+app.put('/api/responsaveis/:id/perfil', (req, res) => {
+  try {
+    const { id } = req.params;
+    const updated = studentQueries.updateGuardianProfile(id, req.body);
+    broadcastEvent('PERFIL_ATUALIZADO', { adultId: id });
+    res.json({ success: true, adult: updated });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao atualizar perfil do responsável', details: err.message });
   }
 });
 
@@ -130,27 +196,54 @@ app.post('/api/autorizacoes/terceiro', (req, res) => {
   }
 });
 
-// 5. Revogar/Excluir Autorização de Terceiro (Ponto 6)
-app.delete('/api/autorizacoes/:id', (req, res) => {
+// 4b. Editar Autorização de Terceiro/Van existente
+app.put('/api/autorizacoes/:id', (req, res) => {
   try {
     const { id } = req.params;
-    const result = studentQueries.revokeAuthorization(id);
-    broadcastEvent('AUTORIZACAO_REVOGADA', { authId: id });
+    const result = studentQueries.updateThirdPartyAuthorization(id, req.body);
+    broadcastEvent('AUTORIZACAO_ATUALIZADA', result);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: 'Erro ao revogar autorização', details: err.message });
+    res.status(403).json({ error: err.message || 'Erro ao editar autorização' });
   }
 });
 
-// 6. Gerar PIN Familiar Unificado (Ponto 9: 1 PIN para múltiplos filhos)
+// 5. Revogar ou Excluir Permanentemente Autorização de Terceiro (Ponto 6)
+app.delete('/api/autorizacoes/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const permanent = req.query.permanent === 'true';
+    const result = studentQueries.revokeAuthorization(id, permanent);
+    broadcastEvent('AUTORIZACAO_REVOGADA', { authId: id, permanent });
+    res.json(result);
+  } catch (err) {
+    res.status(403).json({ error: err.message || 'Erro ao revogar/excluir autorização' });
+  }
+});
+
+// 6. Gerar PIN Individual ou Familiar Unificado (Ponto 9: 1 PIN para múltiplos filhos)
+app.post('/api/pins/gerar', (req, res) => {
+  try {
+    const { studentId, criadoPor, code } = req.body;
+    if (!studentId) {
+      return res.status(400).json({ error: 'studentId é obrigatório' });
+    }
+    const pin = pinQueries.createFamilyPin([studentId], criadoPor || 'App Responsável', code);
+    broadcastEvent('PIN_GERADO', pin);
+    res.status(201).json(pin);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao gerar PIN', details: err.message });
+  }
+});
+
 app.post('/api/pins/gerar-familiar', (req, res) => {
   try {
-    const { studentIds, criadoPor } = req.body;
+    const { studentIds, criadoPor, code } = req.body;
     if (!studentIds || !Array.isArray(studentIds) || !studentIds.length) {
       return res.status(400).json({ error: 'studentIds deve ser um array com pelo menos 1 ID de aluno' });
     }
 
-    const pin = pinQueries.createFamilyPin(studentIds, criadoPor || 'App Responsável');
+    const pin = pinQueries.createFamilyPin(studentIds, criadoPor || 'App Responsável', code);
     broadcastEvent('PIN_GERADO', pin);
     res.status(201).json(pin);
   } catch (err) {
@@ -195,10 +288,18 @@ app.post('/api/saidas/registrar', (req, res) => {
     const savedLogs = [];
 
     for (const item of logsToSave) {
+      if (!item) continue;
       const logEntry = logQueries.record(item);
       savedLogs.push(logEntry);
 
-      // Notifica em tempo real (TV e App)
+      const isDeniedOrBlocked = logEntry.status === 'NEGADO' || logEntry.status === 'BLOQUEADO';
+
+      if (isDeniedOrBlocked) {
+        broadcastEvent('ALERTA_SEGURANCA', logEntry);
+        continue;
+      }
+
+      // Notifica em tempo real (TV e App) apenas para liberações confirmadas
       broadcastEvent('ALUNO_LIBERADO', logEntry);
 
       // Dispara WhatsApp para a família
@@ -310,6 +411,92 @@ app.get('/api/logs', (req, res) => {
     res.json(logs);
   } catch (err) {
     res.status(500).json({ error: 'Erro ao obter logs', details: err.message });
+  }
+});
+
+// ==========================================
+// CÓDIGO SECRETO DIÁRIO (LIBERAÇÃO ADMINISTRATIVA)
+// ==========================================
+
+// 13. Consultar Código Secreto do Dia (Painel da Coordenação / Admin)
+app.get('/api/admin/codigo-diario', (req, res) => {
+  try {
+    const codeInfo = dailyCodeQueries.getOrCreateToday();
+    res.json(codeInfo);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao consultar código secreto diário', details: err.message });
+  }
+});
+
+// 14. Rotacionar / Gerar Novo Código Secreto Hoje (Painel da Coordenação / Admin)
+app.post('/api/admin/codigo-diario/rotacionar', (req, res) => {
+  try {
+    const codeInfo = dailyCodeQueries.rotateToday();
+    broadcastEvent('CODIGO_DIARIO_ATUALIZADO', { dataDia: codeInfo.dataDia, rotacoes: codeInfo.rotacoes });
+    res.json(codeInfo);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao rotacionar código secreto diário', details: err.message });
+  }
+});
+
+// 15. Validar Código Secreto Diário no Totem para Liberação sem PIN e sem Biometria
+app.post('/api/admin/validar-codigo-diario', (req, res) => {
+  try {
+    const { code, studentId, funcionarioNome, motivo } = req.body;
+    if (!code || !studentId) {
+      return res.status(400).json({ valid: false, reason: 'Código diário e aluno são obrigatórios.' });
+    }
+
+    const check = dailyCodeQueries.validateCode(code);
+    if (!check.valid) {
+      return res.status(401).json({ valid: false, reason: 'Código Secreto Diário inválido ou expirado.' });
+    }
+
+    const allStudents = studentQueries.getAll();
+    const student = allStudents.find(s => s.id === studentId || s.matricula === studentId);
+    if (!student) {
+      return res.status(404).json({ valid: false, reason: 'Aluno não localizado para liberação administrativa.' });
+    }
+
+    const operador = (funcionarioNome || '').trim() || 'Funcionário Autorizado da Escola';
+    const justificativa = (motivo || '').trim() || 'Liberação direta sem PIN/Biometria via Código Secreto Diário';
+
+    const logEntry = logQueries.record({
+      studentId: student.id,
+      alunoNome: student.nome,
+      alunoMatricula: student.matricula,
+      alunoTurma: student.turma,
+      adultoId: 'admin-override',
+      adultoNome: operador,
+      adultoParentesco: 'Funcionário / Código Secreto Diário',
+      fotoCapturadaAoVivo: student.foto || null,
+      similaridadeBiometrica: 'Bypass Autorizado (Código Diário)',
+      metodo: `Código Secreto Diário: ${justificativa}`,
+      status: 'LIBERADO',
+      portao: 'Portaria Principal'
+    });
+
+    broadcastEvent('ALUNO_LIBERADO', logEntry);
+
+    if (Array.isArray(student.responsaveis)) {
+      for (const resp of student.responsaveis) {
+        if (resp.telefone && resp.tipo === 'LEGAL') {
+          WhatsappService.notificarSaidaLiberada({
+            telefone: resp.telefone,
+            alunoNome: logEntry.alunoNome,
+            adultoNome: logEntry.adultoNome,
+            parentesco: logEntry.adultoParentesco,
+            portao: logEntry.portao,
+            timestamp: logEntry.timestamp,
+            fotoUrl: logEntry.fotoCapturadaAoVivo
+          }).catch(e => console.warn('Erro ao enviar WhatsApp:', e));
+        }
+      }
+    }
+
+    res.json({ valid: true, student, log: logEntry });
+  } catch (err) {
+    res.status(500).json({ valid: false, reason: 'Erro interno ao validar código diário.', details: err.message });
   }
 });
 

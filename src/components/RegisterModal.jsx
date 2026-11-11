@@ -1,14 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, X, Check, AlertCircle, RefreshCw, UserCheck, Video } from 'lucide-react';
+import { Camera, X, Check, AlertCircle, RefreshCw, UserCheck, Video, Upload } from 'lucide-react';
 import { 
   startCameraStream, stopCameraStream, detectFaceAndComputeDescriptor, 
-  getVideoDevices 
+  getVideoDevices, captureVideoFrameDataUrl 
 } from '../services/faceService';
 import { addAuthorizedAdult, getStudents } from '../services/storage';
 import { playSuccessChime } from '../services/audioService';
 
 export default function RegisterModal({ isOpen, onClose, studentId, onSaved }) {
-  const [students] = useState(() => getStudents());
+  const [students, setStudents] = useState(() => getStudents());
   const [selectedStudentId, setSelectedStudentId] = useState(studentId || students[0]?.id || '');
   const [nome, setNome] = useState('');
   const [parentesco, setParentesco] = useState('Pai/Mãe');
@@ -24,6 +24,7 @@ export default function RegisterModal({ isOpen, onClose, studentId, onSaved }) {
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   function stopCamera() {
     if (streamRef.current) {
@@ -53,6 +54,17 @@ export default function RegisterModal({ isOpen, onClose, studentId, onSaved }) {
       stopCamera();
       return;
     }
+
+    const latestStudents = getStudents();
+    setStudents(latestStudents);
+    if (studentId) {
+      setSelectedStudentId(studentId);
+    } else if (latestStudents.length > 0 && !latestStudents.some(s => s.id === selectedStudentId)) {
+      setSelectedStudentId(latestStudents[0].id);
+    }
+    setCapturedPhoto(null);
+    setFaceDescriptor(null);
+    setErrorMsg('');
 
     let isMounted = true;
     async function initCamera() {
@@ -93,15 +105,9 @@ export default function RegisterModal({ isOpen, onClose, studentId, onSaved }) {
     setErrorMsg('');
 
     try {
-      const canvas = document.createElement('canvas');
-      canvas.width = videoRef.current.videoWidth || 640;
-      canvas.height = videoRef.current.videoHeight || 480;
-      const ctx = canvas.getContext('2d');
-      // Mirror image horizontally to match webcam display
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      const photoDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      const snapped = captureVideoFrameDataUrl(videoRef.current, true);
+      if (!snapped) return;
+      const { canvas, dataUrl: photoDataUrl } = snapped;
 
       // Detect face and compute 128-d biometric descriptor
       const detection = await detectFaceAndComputeDescriptor(canvas);
@@ -126,6 +132,37 @@ export default function RegisterModal({ isOpen, onClose, studentId, onSaved }) {
     setCapturedPhoto(null);
     setFaceDescriptor(null);
     startCamera();
+  }
+
+  function handleFileUpload(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setErrorMsg('');
+    setIsProcessing(true);
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target.result;
+      const img = new Image();
+      img.onload = async () => {
+        try {
+          const detection = await detectFaceAndComputeDescriptor(img);
+          if (!detection || !detection.descriptor) {
+            setErrorMsg('Nenhum rosto detectado nesta foto. Tente uma selfie frontal iluminada.');
+            return;
+          }
+          setCapturedPhoto(dataUrl);
+          setFaceDescriptor(detection.descriptor);
+          stopCamera();
+        } catch (err) {
+          setErrorMsg('Erro ao processar imagem: ' + err.message);
+        } finally {
+          setIsProcessing(false);
+        }
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
   }
 
   function handleSave() {
@@ -397,19 +434,39 @@ export default function RegisterModal({ isOpen, onClose, studentId, onSaved }) {
             )}
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'center', marginTop: '12px' }}>
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept="image/*"
+            capture="user"
+            style={{ display: 'none' }}
+            onChange={handleFileUpload}
+          />
+
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '12px' }}>
             {!capturedPhoto ? (
-              <button
-                type="button"
-                id="btn-capturar-rosto"
-                className="button-primary"
-                onClick={handleCapturePhoto}
-                disabled={isProcessing}
-                style={{ width: '100%' }}
-              >
-                <Camera size={18} />
-                <span>{isProcessing ? 'Extraindo biometria...' : 'Fotografar Rosto & Extrair Biometria'}</span>
-              </button>
+              <>
+                <button
+                  type="button"
+                  id="btn-capturar-rosto"
+                  className="button-primary"
+                  onClick={handleCapturePhoto}
+                  disabled={isProcessing}
+                  style={{ flex: 1 }}
+                >
+                  <Camera size={18} />
+                  <span>{isProcessing ? 'Extraindo biometria...' : 'Fotografar Rosto'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                  disabled={isProcessing}
+                >
+                  <Upload size={16} />
+                  <span>Enviar Foto</span>
+                </button>
+              </>
             ) : (
               <button
                 type="button"

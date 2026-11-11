@@ -575,3 +575,92 @@ body {
   max-height: 90vh;
   overflow-y: auto;
 }
+
+.input-field {
+  width: 100%;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  color: #fff;
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.input-field:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.input-field:disabled,
+.input-field[readonly] {
+  opacity: 0.65;
+  cursor: not-allowed;
+  background: rgba(15, 20, 34, 0.6);
+}
+
+/* Mobile Responsive Refinements (Totem, App Pais e Painel Coordenação) */
+@media (max-width: 640px) {
+  .phone-mockup-wrapper {
+    max-width: 100%;
+    margin: 0;
+    border-radius: 0;
+    border: none;
+    min-height: calc(100vh - 60px);
+    box-shadow: none;
+  }
+
+  .phone-top-bar {
+    display: none;
+  }
+
+  .phone-screen {
+    padding: 16px 14px;
+    min-height: auto;
+  }
+
+  .kiosk-wrapper {
+    padding: 16px 14px;
+    border-radius: var(--radius-md);
+  }
+
+  .numpad-grid {
+    gap: 8px;
+    max-width: 100%;
+  }
+
+  .numpad-key {
+    height: 58px;
+    font-size: 1.4rem;
+  }
+
+  .pin-display-row {
+    gap: 8px;
+  }
+
+  .pin-slot {
+    width: 42px;
+    height: 54px;
+    font-size: 1.55rem;
+  }
+
+  .biometric-viewport {
+    height: 300px;
+  }
+
+  .face-guide-oval {
+    width: 170px;
+    height: 220px;
+  }
+
+  .modal-backdrop {
+    padding: 10px;
+  }
+
+  .modal-card {
+    padding: 18px;
+    max-height: 94vh;
+  }
+}
